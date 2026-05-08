@@ -243,16 +243,48 @@
     </footer>
 
     <script>
-      // Stripe Checkout placeholder. When the license worker + Stripe products
-      // are live, replace `STRIPE_CHECKOUT_URL` with `https://buy.stripe.com/...`
-      // Pricing Table or call /api/checkout-session via Cloudflare Pages Function.
+      // Stripe Checkout via /api/checkout (Cloudflare Pages Function).
+      // Price IDs from Stripe test mode (acct_1SWLoDDUMJkQwpuN).
+      // Switch to live mode IDs once test validation is complete.
+      const PRICES = {
+        pro: {
+          monthly: 'price_1TUwQaDUMJkQwpuN6GCkJlF1', // R$ 79
+          yearly: 'price_1TUwQbDUMJkQwpuNDg13xglr',  // R$ 790
+        },
+        agency: {
+          monthly: 'price_1TUwQcDUMJkQwpuN2A44CHXx', // R$ 399
+          yearly: 'price_1TUwQdDUMJkQwpuNOF4pt9wB',  // R$ 3990
+        },
+      };
+
       document.querySelectorAll('.js-checkout').forEach((el) => {
-        el.addEventListener('click', (e) => {
+        el.addEventListener('click', async (e) => {
           e.preventDefault();
           const tier = el.dataset.tier;
-          alert(
-            `Stripe checkout em breve! Plano "${tier}" estará disponível assim que a license worker for deployada (Sprint 3).`,
-          );
+          const period = el.dataset.period || 'monthly';
+          const priceId = PRICES[tier]?.[period];
+          if (!priceId) {
+            alert('Plano indisponível. Tente novamente.');
+            return;
+          }
+          el.textContent = 'Redirecionando…';
+          try {
+            const res = await fetch('/api/checkout', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({ priceId, tier, period }),
+            });
+            if (!res.ok) {
+              const errBody = await res.text();
+              throw new Error(`Stripe API ${res.status}: ${errBody.slice(0, 200)}`);
+            }
+            const { url } = await res.json();
+            window.location.href = url;
+          } catch (err) {
+            console.error('checkout error', err);
+            alert(`Erro ao iniciar checkout: ${err.message}`);
+            el.textContent = `Assinar ${tier === 'pro' ? 'Pro' : 'Agency'}`;
+          }
         });
       });
     </script>
