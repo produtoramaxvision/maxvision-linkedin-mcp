@@ -1,46 +1,64 @@
-# DNS Records — Sprint 0
+# DNS Records — Sprint 0 (zone única produtoramaxvision.com.br)
 
-VPS public IP: **163.176.233.224** (Oracle Cloud, ARM64).
+**Estratégia**: tudo concentrado na zone `produtoramaxvision.com.br` (Cloudflare). Sem Vercel, sem `meuagente.api.br`. Cloudflare Pages para landing, Cloudflare Worker para license server, VPS vmmvp para MCP server.
 
-## Cloudflare zone: `maxvision.com.br`
+VPS vmmvp: `163.176.233.224` (Oracle Cloud, ARM64). Já aliased como `hostinger.produtoramaxvision.com.br` no padrão da zone.
 
-| Subdomínio | Tipo | Aponta para | Proxy | TTL | Uso |
+## Status atual
+
+| Subdomínio | Tipo | Target | Proxy | Status | Quem cria |
 |---|---|---|---|---|---|
-| `linkedin.maxvision.com.br` | CNAME | `cname.vercel-dns.com` | DNS only | Auto | Landing Vercel |
-| `license.linkedin.maxvision.com.br` | CNAME | `linkedin-license.<workers-subdomain>.workers.dev` | Proxied | Auto | Cloudflare Worker license server |
-| `api.linkedin.maxvision.com.br` | A | `163.176.233.224` | DNS only | Auto | API pública (futuro Sprint 2+) |
+| `linkedin-mcp.produtoramaxvision.com.br` | CNAME | `hostinger.produtoramaxvision.com.br` | DNS only | ✅ **CRIADO** (2026-05-08) | Cloudflare MCP |
+| `linkedin.produtoramaxvision.com.br` | CNAME | `<projeto>.pages.dev` | Auto (proxied) | ⏳ Sprint 0 (1.10) | Cloudflare Pages auto-cria |
+| `license.linkedin.produtoramaxvision.com.br` | CNAME | Worker route | Proxied | ⏸ Sprint 3 (deferido) | `wrangler deploy` auto-cria |
+| `api.linkedin.produtoramaxvision.com.br` | A | `163.176.233.224` | DNS only | ⏸ Sprint 2+ (skip) | Manual quando precisar |
 
-## Cloudflare zone: `meuagente.api.br`
+## Detalhes
 
-| Subdomínio | Tipo | Aponta para | Proxy | TTL | Uso |
-|---|---|---|---|---|---|
-| `linkedin-mcp.meuagente.api.br` | A | `163.176.233.224` | DNS only | Auto | MCP server prod (Traefik http-challenge precisa DNS only) |
+### 1. `linkedin-mcp.produtoramaxvision.com.br` ✅ CRIADO
 
-## Notas críticas
+Aponta para a VPS vmmvp via CNAME pra `hostinger.produtoramaxvision.com.br` (que resolve `163.176.233.224`).
 
-1. **Traefik na VPS usa `letsencryptresolver` com httpchallenge** (porta 80). Cloudflare proxy (laranja) **bloqueia** esse fluxo — manter como `DNS only` (cinza) para qualquer host que precise de cert via Traefik.
-2. **Worker** pode (e deve) ficar com proxy laranja — Cloudflare gera cert automaticamente no Worker route.
-3. **Vercel** entrega cert via Vercel ACME — manter DNS only.
-4. Para `api.linkedin.maxvision.com.br`, criar somente quando Sprint 2 expor REST/SSE público — não precisa hoje.
+**DNS only obrigatório**: Traefik na VPS usa Let's Encrypt HTTP-01 (porta 80). Cloudflare proxy bloqueia esse fluxo.
 
-## Comando wrangler para criar custom domain do Worker (executar APÓS deploy do Worker)
+ID Cloudflare: `025bfd71f5774784945deef3e3699b0a`.
 
+Verificação:
 ```bash
-# Cloudflare API token deve ter scope: Zone.DNS:Edit + Workers:Edit
-# Adicionar em wrangler.toml > [[routes]]:
-# pattern = "license.linkedin.maxvision.com.br/*"
-# zone_name = "maxvision.com.br"
-# Quando rodar `npx wrangler deploy`, Cloudflare cria o DNS automaticamente.
+nslookup linkedin-mcp.produtoramaxvision.com.br      # → 163.176.233.224
 ```
 
-## Verificação pós-criação
+### 2. `linkedin.produtoramaxvision.com.br` (landing) — Sprint 0 etapa 1.10
 
-```bash
-# Esperado depois de propagação (1–5 min):
-dig +short linkedin.maxvision.com.br                    # → IPs Vercel
-dig +short license.linkedin.maxvision.com.br            # → IPs Cloudflare proxy
-dig +short linkedin-mcp.meuagente.api.br                # → 163.176.233.224
+Cloudflare Pages cria o registro automaticamente quando você adicionar custom domain ao projeto Pages. Você não precisa criar manualmente.
 
-curl -fsS https://linkedin-mcp.meuagente.api.br/health   # 200 (após stack deployada)
-curl -fsS https://license.linkedin.maxvision.com.br/health  # 200 (após Worker live)
+Workflow:
+1. Deploy projeto Pages via `wrangler pages deploy` ou GitHub integration.
+2. Pages → Custom domains → Add → `linkedin.produtoramaxvision.com.br`.
+3. Pages injeta CNAME automaticamente na zone (mesma conta Cloudflare, sem token extra).
+
+### 3. `license.linkedin.produtoramaxvision.com.br` (Worker) — DEFERIDO Sprint 3
+
+`wrangler deploy` com `[[routes]] custom_domain = true` cria registro DNS automático na zone.
+
+Pré-requisito: API token wrangler com scope `Workers Routes:Edit` + `Zone.DNS:Edit`.
+
+**Defer**: feature Pro ainda não existe. Sem nada pra proteger, license server fica idle.
+
+### 4. `api.linkedin.produtoramaxvision.com.br` — Sprint 2+
+
+API REST pública. Sem propósito hoje. **Não criar.**
+
+## Verificação manual via Cloudflare MCP
+
+```javascript
+// Listar todos registros da zone
+await cloudflare.request({
+  method: "GET",
+  path: "/zones/3fc393601085cf68630fb42fac795bf0/dns_records",
+  query: { name: "linkedin-mcp.produtoramaxvision.com.br" }
+});
 ```
+
+Zone ID: `3fc393601085cf68630fb42fac795bf0` (produtoramaxvision.com.br).
+Account ID: `e15749486b97b79128b82f1cc87a7d16`.

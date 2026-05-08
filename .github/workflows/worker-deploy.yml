@@ -1,0 +1,44 @@
+# =====================================================================
+# .github/workflows/worker-deploy.yml
+# Deploy license server Cloudflare Worker
+# DEFERIDO: ativar quando Sprint 3 (license gating) chegar.
+# Trigger: push em main que toque license-server/**
+# =====================================================================
+name: Worker Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "license-server/**"
+      - ".github/workflows/worker-deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: deploy linkedin-license worker
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: license-server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 9 }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: license-server/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          accountId: ${{ secrets.CF_ACCOUNT_ID }}
+          workingDirectory: license-server
+          command: deploy
