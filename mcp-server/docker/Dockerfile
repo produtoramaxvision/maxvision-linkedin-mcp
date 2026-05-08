@@ -76,8 +76,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install JobSpy (PEP 668: --break-system-packages on debian:bookworm)
+# Note: python-jobspy doesn't expose __version__; import scrape_jobs as smoke test instead.
 RUN pip3 install --no-cache-dir --break-system-packages python-jobspy==1.1.79 \
-    && python3 -c "import jobspy; print('jobspy OK', jobspy.__version__)"
+    && python3 -c "from jobspy import scrape_jobs; print('jobspy import OK')"
 
 # pnpm + Patchright Chromium download
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
