@@ -79,16 +79,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libatspi2.0-0 libxshmfence1 libgtk-3-0 fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
-# Install JobSpy + linkedin-api (PEP 668: --break-system-packages on bookworm).
+# Install JobSpy (PEP 668: --break-system-packages on debian:bookworm)
+# Note: python-jobspy doesn't expose __version__; import scrape_jobs as smoke test instead.
 #
-# linkedin-api (tomquirk fork) wraps LinkedIn voyager GraphQL for /in/<slug>
-# profile data — server-side Patchright nav hits authwall on profile pages, but
-# the voyager endpoints accept the same cookie set our capture flow ships.
-RUN pip3 install --no-cache-dir --break-system-packages \
-        python-jobspy==1.1.79 \
-        linkedin-api==2.3.1 \
-    && python3 -c "from jobspy import scrape_jobs; print('jobspy import OK')" \
-    && python3 -c "from linkedin_api import Linkedin; print('linkedin-api import OK')"
+# linkedin-api 2.3.1 was attempted (Sprint 1.5.7) for /in/<slug> profile via
+# voyager GraphQL but uses the deprecated REST profileView endpoint that
+# returns HTTP 410. Sprint 2 will implement custom GraphQL calls.
+RUN pip3 install --no-cache-dir --break-system-packages python-jobspy==1.1.79 \
+    && python3 -c "from jobspy import scrape_jobs; print('jobspy import OK')"
 
 # pnpm + Patchright Chromium download
 RUN corepack enable && corepack prepare pnpm@10.33.0 --activate

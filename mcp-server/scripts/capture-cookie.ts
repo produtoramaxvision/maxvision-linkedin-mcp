@@ -63,30 +63,28 @@ function log(msg: string): void {
 }
 
 /**
- * Poll until login completes. Detection signals (any of):
- *   - li_at cookie present with len > 80   (logged-in session token)
- *   - li_rm cookie present with len > 80   (long-lived remember-me token —
- *     Linkedin sometimes only sets li_rm after first session settles)
+ * Poll until login completes. Detection: `li_at` cookie present with len > 80.
  *
- * Returns ALL linkedin.com cookies once login is detected. Caller ships the
- * full set to the server because LinkedIn binds session validation to a
- * combination of cookies (li_at + JSESSIONID + bcookie + bscookie + lidc),
- * not just li_at.
+ * `li_at` is LinkedIn's session token, set the moment a successful login
+ * completes. Stale persistent profiles often retain `li_rm` (remember-me
+ * token) but lose `li_at` after expiry — in that case we want to force a
+ * manual re-login rather than declare "logged in" prematurely.
+ *
+ * Returns ALL linkedin.com cookies once login detected. Caller ships the full
+ * set to the server because LinkedIn binds session validation to a combination
+ * of cookies (li_at + JSESSIONID + bcookie + bscookie + lidc), not just li_at.
  */
 async function pollForLogin(context: BrowserContext): Promise<LinkedInCookie[]> {
   const startedAt = Date.now();
   let lastProgressLog = startedAt;
   while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
     const cookies = (await context.cookies('https://www.linkedin.com')) as LinkedInCookie[];
-    const authed = cookies.find(
-      (c) =>
-        (c.name === 'li_at' || c.name === 'li_rm') &&
-        typeof c.value === 'string' &&
-        c.value.length > 80,
+    const liAt = cookies.find(
+      (c) => c.name === 'li_at' && typeof c.value === 'string' && c.value.length > 80,
     );
-    if (authed) {
+    if (liAt) {
       log(
-        `login detected (${authed.name} length=${authed.value.length}, ` +
+        `login detected (li_at length=${liAt.value.length}, ` +
           `${cookies.length} total cookies for linkedin.com)`,
       );
       return cookies;
