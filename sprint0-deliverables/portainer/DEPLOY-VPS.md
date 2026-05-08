@@ -152,11 +152,30 @@ curl -sS -o /dev/null -w "%{http_code}\n" -X POST \
 # Esperado: 401
 
 # 6.3 — Auth pass + initialize JSON-RPC
+# IMPORTANTE: header `Accept: application/json, text/event-stream` é obrigatório
+# (StreamableHTTPServerTransport rejeita sem ele com erro -32000 "Not Acceptable").
 curl -sS -X POST https://linkedin-mcp.produtoramaxvision.com.br/mcp \
   -H "Authorization: Bearer mxv_<your_key>" \
   -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}'
 # Esperado: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{...},...}}
+
+# 6.4 — tools/list (deve retornar 4 tools)
+curl -sS -X POST https://linkedin-mcp.produtoramaxvision.com.br/mcp \
+  -H "Authorization: Bearer mxv_<your_key>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}'
+# Esperado: result.tools = [search_jobs, get_profile, get_job_details, track_application]
+
+# 6.5 — tools/call invoke real (mock retorna 3 jobs em Sprint 1)
+curl -sS -X POST https://linkedin-mcp.produtoramaxvision.com.br/mcp \
+  -H "Authorization: Bearer mxv_<your_key>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_jobs","arguments":{"keywords":"backend engineer","location":"Remote","maxResults":3}}}'
+# Esperado: result.content[0].text = JSON com count=3, jobs[]
 ```
 
 Se algum teste falhar: ver Troubleshooting.
