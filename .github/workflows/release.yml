@@ -1,0 +1,40 @@
+# =====================================================================
+# .github/workflows/release.yml
+# Tag push (vX.Y.Z) → cria GitHub Release com artifacts
+# =====================================================================
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate changelog from commits
+        id: changelog
+        run: |
+          PREV=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          echo "## Changes" > CHANGELOG.tmp
+          if [ -n "$PREV" ]; then
+            git log --pretty=format:"- %s (%an)" "$PREV..HEAD" >> CHANGELOG.tmp
+          else
+            git log --pretty=format:"- %s (%an)" >> CHANGELOG.tmp
+          fi
+          {
+            echo "## Docker image"
+            echo
+            echo '```'
+            echo "docker pull ghcr.io/${{ github.repository_owner }}/linkedin-maxvision-mcp:${GITHUB_REF_NAME#v}"
+            echo '```'
+          } >> CHANGELOG.tmp
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: CHANGELOG.tmp
+          generate_release_notes: true

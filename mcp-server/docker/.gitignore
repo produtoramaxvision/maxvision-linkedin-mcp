@@ -1,0 +1,23 @@
+# Secrets locais — NUNCA commitar
+secrets/*.txt
+secrets/*.json
+secrets/*.key
+secrets/*.pem
+!secrets/README.md
+!secrets/.gitkeep
+
+# Env locais
+.env
+.env.*
+!.env.example
+
+# Build
+dist/
+node_modules/
+
+# Patchright cache (gerenciado pelo Docker volume)
+ms-playwright/
+
+# Logs
+*.log
+logs/

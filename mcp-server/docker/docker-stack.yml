@@ -1,0 +1,201 @@
+# ============================================================
+# MaxVision LinkedIn MCP — docker-stack.yml
+# Modo: Docker Swarm (multi-node ou single-node Swarm)
+# Uso:
+#   docker swarm init   # se ainda não inicializado
+#   docker network create --driver overlay --attachable traefik-public
+#   echo "<value>" | docker secret create maxv_master_key -
+#   echo "<value>" | docker secret create maxv_postgres_password -
+#   echo "<value>" | docker secret create maxv_webhook_secret -
+#   echo "<value>" | docker secret create maxv_license_key -
+#   docker secret create maxv_li_cookies ./secrets/li_cookies.json
+#   docker stack deploy -c docker-stack.yml maxv-linkedin
+#
+# Compose v3 — exigido pelo `docker stack deploy`. Se v3.9 não disponível,
+# baixar para v3.8 (drop `configs:` ou checar engine version).
+# ============================================================
+version: "3.9"
+
+services:
+  mcp:
+    image: ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:${MCP_VERSION:-latest}
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      METRICS_PORT: 9090
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_URL: postgres://mcp:$(cat /run/secrets/maxv_postgres_password)@postgres:5432/mcp
+      REDIS_URL: redis://redis:6379
+      MASTER_KEY_FILE: /run/secrets/maxv_master_key
+      LICENSE_KEY_FILE: /run/secrets/maxv_license_key
+      LI_COOKIES_FILE: /run/secrets/maxv_li_cookies
+      WEBHOOK_SECRET_FILE: /run/secrets/maxv_webhook_secret
+      ENABLE_WEBHOOKS: ${ENABLE_WEBHOOKS:-true}
+      SSE_ENABLED: ${SSE_ENABLED:-true}
+      PATCHRIGHT_HEADLESS: "true"
+      MAXVISION_TELEMETRY: ${MAXVISION_TELEMETRY:-on}
+    secrets:
+      - maxv_master_key
+      - maxv_license_key
+      - maxv_li_cookies
+      - maxv_webhook_secret
+      - maxv_postgres_password
+    volumes:
+      - patchright-cache:/ms-playwright
+      - profile-data:/var/data/profiles
+      - screenshot-data:/var/data/screenshots
+      - mcp-logs:/var/log/mcp
+    networks:
+      - traefik-public
+      - mcp-internal
+    deploy:
+      mode: replicated
+      replicas: ${MCP_REPLICAS:-1}
+      placement:
+        constraints:
+          - node.role == worker
+        preferences:
+          - spread: node.labels.zone
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        order: stop-first
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 120s
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+      labels:
+        traefik.enable: "true"
+        traefik.docker.network: "traefik-public"
+        traefik.http.routers.linkedin-mcp.rule: "Host(`${MCP_HOST:-linkedin-mcp.example.com}`)"
+        traefik.http.routers.linkedin-mcp.entrypoints: "websecure"
+        traefik.http.routers.linkedin-mcp.tls: "true"
+        traefik.http.routers.linkedin-mcp.tls.certresolver: "letsencrypt"
+        traefik.http.services.linkedin-mcp.loadbalancer.server.port: "3000"
+        traefik.http.services.linkedin-mcp.loadbalancer.healthcheck.path: "/health"
+        traefik.http.services.linkedin-mcp.loadbalancer.healthcheck.interval: "30s"
+        traefik.http.middlewares.linkedin-mcp-ratelimit.ratelimit.average: "100"
+        traefik.http.middlewares.linkedin-mcp-ratelimit.ratelimit.burst: "50"
+        traefik.http.routers.linkedin-mcp.middlewares: "linkedin-mcp-ratelimit@swarm"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mcp
+      POSTGRES_PASSWORD_FILE: /run/secrets/maxv_postgres_password
+      POSTGRES_DB: mcp
+    secrets:
+      - maxv_postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    configs:
+      - source: postgres_init
+        target: /docker-entrypoint-initdb.d/01-init.sql
+        mode: 0444
+    networks:
+      - mcp-internal
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.maxv.db == true
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp -d mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - mcp-internal
+    deploy:
+      mode: replicated
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.maxv.cache == true
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 384M
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+secrets:
+  maxv_master_key:
+    external: true
+  maxv_license_key:
+    external: true
+  maxv_li_cookies:
+    external: true
+  maxv_webhook_secret:
+    external: true
+  maxv_postgres_password:
+    external: true
+
+configs:
+  postgres_init:
+    file: ./postgres/init.sql
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  patchright-cache:
+    driver: local
+  profile-data:
+    driver: local
+  screenshot-data:
+    driver: local
+  mcp-logs:
+    driver: local
+
+networks:
+  traefik-public:
+    external: true
+    name: traefik-public
+  mcp-internal:
+    driver: overlay
+    attachable: false

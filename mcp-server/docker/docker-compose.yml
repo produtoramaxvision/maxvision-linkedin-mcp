@@ -1,0 +1,132 @@
+# ============================================================
+# MaxVision LinkedIn MCP — docker-compose.yml
+# Modo: Docker Engine standalone (single host)
+# Uso: docker compose up -d
+#
+# Para Swarm/Portainer, usar docker-stack.yml ou portainer-stack.yml.
+# ============================================================
+name: maxvision-linkedin-mcp
+
+services:
+  mcp:
+    image: ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:${MCP_VERSION:-latest}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: maxvision-linkedin-mcp
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      METRICS_PORT: 9090
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      DB_URL: postgres://${POSTGRES_USER:-mcp}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-mcp}
+      REDIS_URL: redis://redis:6379
+      MASTER_KEY_FILE: /run/secrets/master_key
+      LICENSE_KEY_FILE: /run/secrets/license_key
+      LI_COOKIES_FILE: /run/secrets/li_cookies
+      ENABLE_WEBHOOKS: ${ENABLE_WEBHOOKS:-true}
+      WEBHOOK_SECRET_FILE: /run/secrets/webhook_secret
+      SSE_ENABLED: ${SSE_ENABLED:-true}
+      PATCHRIGHT_HEADLESS: ${PATCHRIGHT_HEADLESS:-true}
+      MAXVISION_TELEMETRY: ${MAXVISION_TELEMETRY:-on}
+    secrets:
+      - master_key
+      - license_key
+      - li_cookies
+      - webhook_secret
+    volumes:
+      - patchright-cache:/ms-playwright
+      - profile-data:/var/data/profiles
+      - screenshot-data:/var/data/screenshots
+      - mcp-logs:/var/log/mcp
+    networks:
+      - traefik-public
+      - mcp-internal
+    ports:
+      - "${MCP_PORT:-3000}:3000"
+      - "${MCP_METRICS_PORT:-9090}:9090"
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: "traefik-public"
+      traefik.http.routers.linkedin-mcp.rule: "Host(`${MCP_HOST:-linkedin-mcp.localhost}`)"
+      traefik.http.routers.linkedin-mcp.entrypoints: "websecure"
+      traefik.http.routers.linkedin-mcp.tls.certresolver: "letsencrypt"
+      traefik.http.services.linkedin-mcp.loadbalancer.server.port: "3000"
+      traefik.http.middlewares.linkedin-mcp-headers.headers.customrequestheaders.X-Forwarded-Proto: "https"
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: maxvision-mcp-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-mcp}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      POSTGRES_DB: ${POSTGRES_DB:-mcp}
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - mcp-internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-mcp} -d ${POSTGRES_DB:-mcp}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: maxvision-mcp-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - mcp-internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+secrets:
+  master_key:
+    file: ./secrets/master_key.txt
+  license_key:
+    file: ./secrets/license_key.txt
+  li_cookies:
+    file: ./secrets/li_cookies.json
+  webhook_secret:
+    file: ./secrets/webhook_secret.txt
+  postgres_password:
+    file: ./secrets/postgres_password.txt
+
+volumes:
+  postgres-data:
+  redis-data:
+  patchright-cache:
+  profile-data:
+  screenshot-data:
+  mcp-logs:
+
+networks:
+  traefik-public:
+    external: true
+  mcp-internal:
+    driver: bridge
+    internal: false

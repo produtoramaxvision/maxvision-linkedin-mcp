@@ -1,0 +1,48 @@
+# ============================================================
+# MaxVision LinkedIn License Server — Cloudflare Worker
+# Domain: license.linkedin.maxvision.com.br
+# Deploy:
+#   cd sprint0-deliverables/cloudflare-worker
+#   pnpm install
+#   pnpm dlx wrangler login
+#   pnpm dlx wrangler kv namespace create LICENSES
+#   pnpm dlx wrangler kv namespace create LICENSES --preview
+#   # Cole os IDs retornados em [[kv_namespaces]] abaixo
+#   pnpm dlx wrangler secret put STRIPE_WEBHOOK_SECRET
+#   pnpm dlx wrangler secret put STRIPE_API_KEY
+#   pnpm dlx wrangler secret put MASTER_SIGNING_KEY     # ed25519 priv key (b64)
+#   pnpm dlx wrangler deploy
+# ============================================================
+
+name = "linkedin-license"
+main = "src/index.ts"
+compatibility_date = "2026-05-07"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true       # rota .workers.dev mantida como fallback
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+# Custom domain (substitui DNS automaticamente quando deploy roda)
+[[routes]]
+pattern = "license.linkedin.maxvision.com.br/*"
+zone_name = "maxvision.com.br"
+custom_domain = true
+
+# KV — armazena licenças (license_id → metadata + status)
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "<TODO_PASTE_ID_AFTER_kv_namespace_create>"
+preview_id = "<TODO_PASTE_PREVIEW_ID>"
+
+# Vars não-secretas
+[vars]
+ENVIRONMENT = "production"
+LICENSE_PUBLIC_KEY_B64 = "<TODO_REPLACE_WITH_ED25519_PUBLIC_KEY_BASE64>"
+ALLOWED_ORIGINS = "https://linkedin.maxvision.com.br"
+
+# Logs — opcional; remove se não quiser tail/persistente
+# [[analytics_engine_datasets]]
+# binding = "LICENSE_EVENTS"
+# dataset = "license_events_v1"
