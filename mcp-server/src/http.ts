@@ -40,6 +40,7 @@ import { z } from 'zod';
 import { logger } from './logger.js';
 import { authenticateApiKey } from './auth/api-key.js';
 import { encryptCookie } from './auth/cookies.js';
+import { withRequestContext } from './auth/request-context.js';
 import { db } from './db/client.js';
 import { accounts, auditLog } from './db/schema.js';
 import { registerAllTools } from './tools/_registry.js';
@@ -232,14 +233,24 @@ export async function startHttpServer(port: number): Promise<void> {
       logger.warn({ reason: auth.reason }, 'auth fail on /mcp');
       return c.json({ error: 'unauthorized', message: auth.reason }, 401);
     }
-    const mcp = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
-    registerAllTools(mcp);
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-      enableJsonResponse: true,
+
+    // Sprint 3.4 — propagate the license key into the per-request
+    // AsyncLocalStorage context so tool handlers can call gateToolByLicense().
+    // The header is OPTIONAL: when LICENSE_CHECK_ENABLED=false the gate is
+    // a noop; when true, Pro/Agency tools 401 without a valid key.
+    const licenseKey = c.req.header('x-maxvision-license') ?? undefined;
+    const ctx: import('./auth/request-context.js').RequestContext = { licenseKey };
+
+    return withRequestContext(ctx, async () => {
+      const mcp = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+      registerAllTools(mcp);
+      const transport = new WebStandardStreamableHTTPServerTransport({
+        sessionIdGenerator: undefined,
+        enableJsonResponse: true,
+      });
+      await mcp.connect(transport);
+      return transport.handleRequest(c.req.raw);
     });
-    await mcp.connect(transport);
-    return transport.handleRequest(c.req.raw);
   });
 
   // ----- Sprint 5: webhook routes for n8n hybrid Variant B -----

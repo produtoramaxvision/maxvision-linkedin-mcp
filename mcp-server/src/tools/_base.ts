@@ -20,6 +20,8 @@ import { auditLog } from '../db/schema.js';
 import { logger } from '../logger.js';
 import { checkRateLimit, type Action } from '../rate-limit/strategy.js';
 import { AppError } from '../errors.js';
+import { gateToolByLicense } from '../auth/license.js';
+import { getRequestContext } from '../auth/request-context.js';
 
 /** Truncated SHA-256 hex (32 chars). Stored in audit_log; collisions
  *  irrelevant for forensic queries scoped by tool + account + time. */
@@ -78,7 +80,17 @@ export function withInstrumentation<I, O>(
       const parsedInput = tool.inputSchema.parse(rawInput);
       accountId = (parsedInput as { accountId?: string }).accountId ?? 'default';
 
-      // 2. Rate limit gate.
+      // 2. License gate (Sprint 3.4). When LICENSE_CHECK_ENABLED!=true, the
+      // gate is a no-op — Free dev mode allows all tools regardless of
+      // header presence. When enabled, Pro tools require a valid
+      // X-MaxVision-License header (forwarded from /mcp via AsyncLocalStorage).
+      const reqCtx = getRequestContext();
+      const licenseDeny = await gateToolByLicense(tool.name, reqCtx.licenseKey);
+      if (licenseDeny) {
+        throw new AppError('UPSTREAM_FAIL', licenseDeny, { tool: tool.name });
+      }
+
+      // 3. Rate limit gate.
       const rl = await checkRateLimit(accountId, tool.name);
       if (!rl.allowed) {
         throw new AppError('RATE_LIMITED', `Rate limit exceeded for ${tool.name}`, {
