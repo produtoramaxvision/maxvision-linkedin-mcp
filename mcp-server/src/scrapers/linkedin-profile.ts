@@ -1,26 +1,19 @@
 /**
- * LinkedIn profile scraper — Sprint 1.5 real Patchright nav.
+ * LinkedIn profile scraper — Sprint 6.2 backend-aware.
  *
- * Acquires a per-account BrowserContext from `browserPool`, navigates to the
- * profile URL, guards against captcha (HTTP 999) and authwall redirects, and
- * extracts profile sections via `page.evaluate`.
- *
- * Selector caveat: LinkedIn profile DOM uses ad-hoc class names ("text-heading-xlarge",
- * etc.) that mutate frequently. We try multiple candidates per field. Sprint
- * 1.5.1 will validate selectors against authenticated DOM with sandbox cookie.
+ * Routes through fetchAndParse() which selects Patchright (Free, blocked
+ * by authwall server-side) or Scrapfly/BrightData (Pro/Agency, bypasses
+ * authwall via residential proxy + JA3 spoof + JS render).
  */
-/// <reference lib="dom" />
-import { browserPool } from '../browser/pool.js';
-import { db } from '../db/client.js';
-import { captchaEvents } from '../db/schema.js';
+import { fetchAndParse } from '../browser/fetch-and-parse.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
 export interface ProfileExperience {
   title: string;
   company: string;
-  startDate: string;       // ISO YYYY-MM
-  endDate: string | null;  // null = current
+  startDate: string;
+  endDate: string | null;
   location?: string;
   description?: string;
 }
@@ -35,7 +28,7 @@ export interface ProfileEducation {
 
 export interface ProfileData {
   url: string;
-  publicId: string;        // slug from /in/<slug>
+  publicId: string;
   fullName: string;
   headline: string;
   location: string;
@@ -45,7 +38,7 @@ export interface ProfileData {
   experience: ProfileExperience[];
   education: ProfileEducation[];
   skills: string[];
-  fetchedAt: string;       // ISO 8601
+  fetchedAt: string;
 }
 
 export async function scrapeProfile(args: {
@@ -54,89 +47,63 @@ export async function scrapeProfile(args: {
 }): Promise<ProfileData> {
   const { accountId, profileUrl } = args;
   const slug = extractPublicId(profileUrl);
-  const acquired = await browserPool.acquire(accountId);
-  const { context, release } = acquired;
+  logger.info({ accountId, profileUrl, slug }, 'profile fetch start');
 
-  try {
-    const page = await context.newPage();
-    logger.info({ accountId, profileUrl, slug }, 'profile nav start');
+  const data = await fetchAndParse({
+    accountId,
+    url: profileUrl,
+    context: 'profile',
+    requireSelectors: ['h1, main'],
+    parse: ($) => {
+      const fullName =
+        $('h1.text-heading-xlarge').first().text().trim() ||
+        $('h1').first().text().trim();
+      const headline =
+        $('div.text-body-medium.break-words').first().text().trim() ||
+        $('.top-card-layout__headline').first().text().trim();
+      const location =
+        $('span.text-body-small.inline.t-black--light.break-words').first().text().trim() ||
+        $('.top-card-layout__first-subline').first().text().trim();
 
-    const response = await page.goto(profileUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
-
-    if (response?.status() === 999) {
-      await db
-        .insert(captchaEvents)
-        .values({ accountId, context: 'profile_view', resolved: false })
-        .catch(() => {});
-      throw new AppError('CAPTCHA_DETECTED', `LinkedIn 999 on profile`, { url: profileUrl });
-    }
-    if (page.url().includes('/authwall') || page.url().includes('/login')) {
-      throw new AppError('COOKIE_EXPIRED', `LinkedIn auth wall on profile`, {
-        redirectedTo: page.url(),
-      });
-    }
-
-    // TODO Sprint 1.5.1: validate selectors with sandbox cookie.
-    // Profile sections in 2025-2026 use shadow-DOM-ish containers; main selectors:
-    //   h1.text-heading-xlarge — full name
-    //   div.text-body-medium — headline (sub h1)
-    //   #experience section, #education section, #skills section
-    await page.waitForSelector('h1, main', { timeout: 15000 });
-
-    const data: ProfileData = await page.evaluate((s: string) => {
-      const text = (sel: string): string =>
-        document.querySelector(sel)?.textContent?.trim() || '';
-      const all = (sel: string): Element[] => Array.from(document.querySelectorAll(sel));
-
-      const fullName = text('h1.text-heading-xlarge') || text('h1');
-      const headline = text('div.text-body-medium.break-words');
-      const location = text('span.text-body-small.inline.t-black--light.break-words');
-
-      const experience: Array<{
-        title: string;
-        company: string;
-        startDate: string;
-        endDate: string | null;
-        location: string;
-        description: string;
-      }> = all('#experience ~ div ul > li, [data-section="experience"] li')
+      const experience: ProfileExperience[] = [];
+      $('#experience ~ div ul > li, [data-section="experience"] li')
         .slice(0, 10)
-        .map((li) => ({
-          title: (li.querySelector('span[aria-hidden="true"]')?.textContent || '').trim(),
-          company: (li.querySelectorAll('span.t-14.t-normal')[0]?.textContent || '').trim(),
-          startDate: '',
-          endDate: null,
-          location: '',
-          description: '',
-        }));
+        .each((_, el) => {
+          const $el = $(el);
+          experience.push({
+            title: $el.find('span[aria-hidden="true"]').first().text().trim(),
+            company: $el.find('span.t-14.t-normal').first().text().trim(),
+            startDate: '',
+            endDate: null,
+            location: '',
+            description: '',
+          });
+        });
 
-      const education: Array<{
-        school: string;
-        degree: string | undefined;
-        field: string | undefined;
-        startYear: number;
-        endYear: number | null;
-      }> = all('#education ~ div ul > li, [data-section="education"] li')
+      const education: ProfileEducation[] = [];
+      $('#education ~ div ul > li, [data-section="education"] li')
         .slice(0, 5)
-        .map((li) => ({
-          school: (li.querySelector('span[aria-hidden="true"]')?.textContent || '').trim(),
-          degree: undefined,
-          field: undefined,
-          startYear: 0,
-          endYear: null,
-        }));
+        .each((_, el) => {
+          education.push({
+            school: $(el).find('span[aria-hidden="true"]').first().text().trim(),
+            degree: undefined,
+            field: undefined,
+            startYear: 0,
+            endYear: null,
+          });
+        });
 
-      const skills: string[] = all('#skills ~ div ul > li span[aria-hidden="true"]')
+      const skills: string[] = [];
+      $('#skills ~ div ul > li span[aria-hidden="true"]')
         .slice(0, 20)
-        .map((el) => el.textContent?.trim() || '')
-        .filter(Boolean);
+        .each((_, el) => {
+          const t = $(el).text().trim();
+          if (t) skills.push(t);
+        });
 
       return {
-        url: window.location.href,
-        publicId: s,
+        url: profileUrl,
+        publicId: slug,
         fullName,
         headline,
         location,
@@ -148,22 +115,11 @@ export async function scrapeProfile(args: {
         skills,
         fetchedAt: new Date().toISOString(),
       };
-    }, slug);
+    },
+  });
 
-    await page.close();
-    logger.info({ accountId, slug, name: data.fullName }, 'profile scrape ok');
-    return data;
-  } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw new AppError(
-      'SCRAPER_FAIL',
-      `profile scrape failed: ${(err as Error).message}`,
-      { profileUrl },
-      err,
-    );
-  } finally {
-    release();
-  }
+  logger.info({ accountId, slug, name: data.fullName }, 'profile scrape ok');
+  return data;
 }
 
 /** Extract `/in/<slug>` from a LinkedIn profile URL. Throws if not matched. */

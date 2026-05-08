@@ -1,17 +1,13 @@
 /**
- * tools/search_people — Sprint 2 people search.
+ * tools/search_people — Sprint 6.2 backend-aware.
  *
- * Navigates `/search/results/people/?keywords=...` and extracts profile cards.
- * Pro/Agency-only in Sprint 3 (license gating). Hits authwall server-side
- * commonly; surfaces COOKIE_EXPIRED when that happens.
+ * Routes through fetchAndParse() — Patchright (free, authwall) or Scrapfly/
+ * BrightData (Pro/Agency, bypasses).
  */
 import { withInstrumentation } from './_base.js';
 import { SearchPeopleInputSchema, type SearchPeopleInput } from './schemas.js';
-import { browserPool } from '../browser/pool.js';
+import { fetchAndParse } from '../browser/fetch-and-parse.js';
 import { logger } from '../logger.js';
-import { AppError } from '../errors.js';
-
-/// <reference lib="dom" />
 
 interface PersonResult {
   url: string;
@@ -39,83 +35,39 @@ export const searchPeople = withInstrumentation<SearchPeopleInput, SearchPeopleO
   description: 'Search LinkedIn people (Pro/Agency tier in Sprint 3).',
   inputSchema: SearchPeopleInputSchema,
   handler: async ({ input, accountId }) => {
-    const { context, release } = await browserPool.acquire(accountId);
-    try {
-      const page = await context.newPage();
-      const url = buildSearchUrl(input);
-      logger.info({ accountId, keywords: input.keywords, url }, 'search_people nav start');
+    const url = buildSearchUrl(input);
+    logger.info({ accountId, keywords: input.keywords, url }, 'search_people start');
 
-      const response = await page.goto(url, {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
-      });
-      if (response?.status() === 999) {
-        throw new AppError('CAPTCHA_DETECTED', 'LinkedIn 999 on /search/results/people');
-      }
-      if (page.url().includes('/authwall') || page.url().includes('/uas/login')) {
-        throw new AppError('COOKIE_EXPIRED', `LinkedIn auth wall on people search`, {
-          redirectedTo: page.url(),
-        });
-      }
-
-      await page.waitForSelector('main, [role="main"]', {
-        timeout: 30000,
-        state: 'attached',
-      });
-
-      const people: PersonResult[] = await page.evaluate((max: number) => {
-        const out: Array<PersonResult> = [];
-        type PersonResult = {
-          url: string;
-          publicId: string;
-          name: string;
-          headline: string;
-          location: string;
-          currentCompany: string;
-        };
-        const cards = document.querySelectorAll('li.reusable-search__result-container');
-        for (const card of Array.from(cards).slice(0, max)) {
-          const link = card.querySelector(
-            'a.app-aware-link[href*="/in/"]',
-          ) as HTMLAnchorElement | null;
-          if (!link) continue;
-          const href = (link.href || '').split('?')[0] || '';
-          const slugMatch = href.match(/\/in\/([^/]+)/);
-          const publicId = (slugMatch?.[1] || '').toLowerCase();
-          const name = (
-            card.querySelector('span[aria-hidden="true"]')?.textContent || ''
-          ).trim();
-          const headline = (
-            card.querySelector('.entity-result__primary-subtitle')?.textContent || ''
-          ).trim();
-          const location = (
-            card.querySelector('.entity-result__secondary-subtitle')?.textContent || ''
-          ).trim();
-          out.push({
-            url: href,
-            publicId,
-            name,
-            headline,
-            location,
-            currentCompany: '',
+    const people = await fetchAndParse<PersonResult[]>({
+      accountId,
+      url,
+      context: 'search_people',
+      requireSelectors: ['main, [role="main"]'],
+      parse: ($) => {
+        const out: PersonResult[] = [];
+        $('li.reusable-search__result-container')
+          .slice(0, input.maxResults)
+          .each((_, el) => {
+            const $el = $(el);
+            const link = $el.find('a.app-aware-link[href*="/in/"]').first();
+            const href = (link.attr('href') || '').split('?')[0] || '';
+            if (!href) return;
+            const slugMatch = href.match(/\/in\/([^/]+)/);
+            const publicId = (slugMatch?.[1] || '').toLowerCase();
+            out.push({
+              url: href.startsWith('http') ? href : `https://www.linkedin.com${href}`,
+              publicId,
+              name: $el.find('span[aria-hidden="true"]').first().text().trim(),
+              headline: $el.find('.entity-result__primary-subtitle').first().text().trim(),
+              location: $el.find('.entity-result__secondary-subtitle').first().text().trim(),
+              currentCompany: '',
+            });
           });
-        }
         return out;
-      }, input.maxResults);
+      },
+    });
 
-      await page.close();
-      logger.info({ accountId, count: people.length }, 'search_people scrape ok');
-      return { count: people.length, people };
-    } catch (err) {
-      if (err instanceof AppError) throw err;
-      throw new AppError(
-        'SCRAPER_FAIL',
-        `search_people failed: ${(err as Error).message}`,
-        { accountId },
-        err,
-      );
-    } finally {
-      release();
-    }
+    logger.info({ accountId, count: people.length }, 'search_people scrape ok');
+    return { count: people.length, people };
   },
 });
