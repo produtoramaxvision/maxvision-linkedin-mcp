@@ -12,15 +12,37 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import { env } from './env.js';
 import { logger } from './logger.js';
 import { registerAllTools } from './tools/_registry.js';
 import { startHttpServer } from './http.js';
 import { browserPool } from './browser/pool.js';
 import { shutdownRateLimit } from './rate-limit/token-bucket.js';
+import { db } from './db/client.js';
 
 const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
+
+const MIGRATIONS_FOLDER = './drizzle/migrations';
+
+async function migrateWithRetry(maxAttempts = 10): Promise<void> {
+  for (let i = 1; i <= maxAttempts; i++) {
+    try {
+      await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+      logger.info({ attempt: i }, 'drizzle migrations applied');
+      return;
+    } catch (err) {
+      if (i === maxAttempts) throw err;
+      const wait = Math.min(2 ** i * 500, 10000);
+      logger.warn(
+        { attempt: i, max: maxAttempts, err: (err as Error).message, wait_ms: wait },
+        'migration retry (postgres may not be ready)',
+      );
+      await new Promise<void>((r) => setTimeout(r, wait));
+    }
+  }
+}
 
 async function main(): Promise<void> {
   if (env.MCP_TRANSPORT === 'http' && env.MCP_API_KEYS.length === 0) {
@@ -29,6 +51,11 @@ async function main(): Promise<void> {
       'HTTP mode without MCP_API_KEYS = open server. NOT FOR PRODUCTION.',
     );
   }
+
+  // Auto-migrate on startup. Retries with exponential backoff while postgres is
+  // booting (depends_on without condition: service_healthy doesn't gate this in
+  // Swarm v3.9 — we wait here instead).
+  await migrateWithRetry();
 
   if (env.MCP_TRANSPORT === 'stdio') {
     const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
