@@ -33,6 +33,11 @@ interface LinkedInCookie {
   name: string;
   value: string;
   domain: string;
+  path: string;
+  expires?: number;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: 'Strict' | 'Lax' | 'None';
 }
 
 interface AdminCookieResponse {
@@ -57,17 +62,34 @@ function log(msg: string): void {
   console.log(`[capture-cookie] ${msg}`);
 }
 
-async function pollForLiAt(context: BrowserContext): Promise<string> {
+/**
+ * Poll until login completes. Detection signals (any of):
+ *   - li_at cookie present with len > 80   (logged-in session token)
+ *   - li_rm cookie present with len > 80   (long-lived remember-me token —
+ *     Linkedin sometimes only sets li_rm after first session settles)
+ *
+ * Returns ALL linkedin.com cookies once login is detected. Caller ships the
+ * full set to the server because LinkedIn binds session validation to a
+ * combination of cookies (li_at + JSESSIONID + bcookie + bscookie + lidc),
+ * not just li_at.
+ */
+async function pollForLogin(context: BrowserContext): Promise<LinkedInCookie[]> {
   const startedAt = Date.now();
   let lastProgressLog = startedAt;
   while (Date.now() - startedAt < POLL_TIMEOUT_MS) {
     const cookies = (await context.cookies('https://www.linkedin.com')) as LinkedInCookie[];
-    const liAt = cookies.find(
-      (c) => c.name === 'li_at' && typeof c.value === 'string' && c.value.length > 80,
+    const authed = cookies.find(
+      (c) =>
+        (c.name === 'li_at' || c.name === 'li_rm') &&
+        typeof c.value === 'string' &&
+        c.value.length > 80,
     );
-    if (liAt) {
-      log(`li_at detected (length=${liAt.value.length})`);
-      return liAt.value;
+    if (authed) {
+      log(
+        `login detected (${authed.name} length=${authed.value.length}, ` +
+          `${cookies.length} total cookies for linkedin.com)`,
+      );
+      return cookies;
     }
     if (Date.now() - lastProgressLog > PROGRESS_LOG_INTERVAL_MS) {
       const elapsedSec = Math.floor((Date.now() - startedAt) / 1000);
@@ -113,16 +135,19 @@ interface PostCookieArgs {
   apiKey: string;
   accountId: string;
   displayName: string;
-  cookieValue: string;
+  cookies: LinkedInCookie[];
   expiresInDays: number;
 }
 
 async function postCookie(args: PostCookieArgs): Promise<AdminCookieResponse> {
   const url = `${args.server}/admin/account-cookie`;
+  // Strip volatile session cookies (timezone, lang, theme) — keep only the
+  // auth-relevant ones the server will replay. We send all and let server
+  // decide; this comment documents intent for future tuning.
   const body = JSON.stringify({
     accountId: args.accountId,
     displayName: args.displayName,
-    cookieValue: args.cookieValue,
+    cookies: args.cookies,
     expiresInDays: args.expiresInDays,
   });
   const baseHeaders: Record<string, string> = {
@@ -225,27 +250,27 @@ async function main(): Promise<void> {
     log('please log in to LinkedIn manually in the open browser window');
 
     // First attempt.
-    let cookieValue = await pollForLiAt(context);
+    let cookies = await pollForLogin(context);
     let valid = await validateCookie(page);
 
     // 1 retry if first attempt fails validation.
     if (!valid) {
       log('cookie failed validation — please log in again in the same browser');
       await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-      cookieValue = await pollForLiAt(context);
+      cookies = await pollForLogin(context);
       valid = await validateCookie(page);
       if (!valid) {
         fail(4, 'cookie validation failed twice. Account may be flagged. Wait 24h and retry.');
       }
     }
 
-    log(`POSTing to ${server}/admin/account-cookie...`);
+    log(`POSTing ${cookies.length} cookies to ${server}/admin/account-cookie...`);
     const result = await postCookie({
       server,
       apiKey,
       accountId,
       displayName,
-      cookieValue,
+      cookies,
       expiresInDays,
     });
 

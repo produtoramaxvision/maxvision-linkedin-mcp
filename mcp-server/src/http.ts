@@ -53,12 +53,37 @@ import { browserPool } from './browser/pool.js';
  * lengths (LinkedIn issues ~150-char tokens; cap protects against accidental
  * pastes of much larger blobs).
  */
-const AdminCookieBodySchema = z.object({
-  accountId: z.string().min(1).max(100).regex(/^[a-z0-9_-]+$/),
-  displayName: z.string().min(1).max(200).optional(),
-  cookieValue: z.string().min(80).max(500),
-  expiresInDays: z.number().int().min(1).max(365).default(90),
+/**
+ * Sprint 1.5.4: shipping `cookieValue` (single li_at) is NOT enough — LinkedIn
+ * 2026 binds session validation to a combination of cookies (li_at, JSESSIONID,
+ * bcookie, bscookie, lidc, li_rm, ...). Capture script now ships an array of
+ * cookie objects. We accept either field for backwards compat:
+ *   - `cookies`: array of {name, value, domain, ...} from Patchright (preferred)
+ *   - `cookieValue`: single li_at string (legacy)
+ */
+const LinkedInCookieSchema = z.object({
+  name: z.string().min(1).max(200),
+  value: z.string().min(1).max(4000),
+  domain: z.string().min(1).max(200),
+  path: z.string().default('/'),
+  httpOnly: z.boolean().optional(),
+  secure: z.boolean().optional(),
+  sameSite: z.enum(['Strict', 'Lax', 'None']).optional(),
+  expires: z.number().optional(),
 });
+
+const AdminCookieBodySchema = z
+  .object({
+    accountId: z.string().min(1).max(100).regex(/^[a-z0-9_-]+$/),
+    displayName: z.string().min(1).max(200).optional(),
+    cookieValue: z.string().min(80).max(500).optional(),
+    cookies: z.array(LinkedInCookieSchema).min(1).max(50).optional(),
+    expiresInDays: z.number().int().min(1).max(365).default(90),
+  })
+  .refine((d) => d.cookies !== undefined || d.cookieValue !== undefined, {
+    message: 'either `cookies` array or `cookieValue` string is required',
+    path: ['cookies'],
+  });
 
 const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
@@ -130,8 +155,26 @@ export async function startHttpServer(port: number): Promise<void> {
       );
     }
 
-    const { accountId, displayName, cookieValue, expiresInDays } = parsed.data;
-    const blob = encryptCookie(cookieValue);
+    const { accountId, displayName, cookieValue, cookies, expiresInDays } = parsed.data;
+    // Encrypt the canonical payload. New flow ships full cookie array as JSON
+    // string under the same bytea column (encryptCookie is bytes-agnostic);
+    // legacy single-cookieValue gets wrapped to a single-element array so the
+    // server-side context.ts hydration code only deals with one shape.
+    const cookiesArray =
+      cookies && cookies.length > 0
+        ? cookies
+        : [
+            {
+              name: 'li_at',
+              value: cookieValue!,
+              domain: '.linkedin.com',
+              path: '/',
+              httpOnly: true,
+              secure: true,
+              sameSite: 'None' as const,
+            },
+          ];
+    const blob = encryptCookie(JSON.stringify(cookiesArray));
     const expiresAt = new Date(Date.now() + expiresInDays * 86400 * 1000);
 
     await db
