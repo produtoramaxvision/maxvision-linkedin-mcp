@@ -51,7 +51,7 @@ export async function searchJobSpy(args: {
         '--results-wanted',
         String(max),
         '--country-indeed',
-        'BR',
+        'brazil',
       ],
       { stdio: ['ignore', 'pipe', 'pipe'] },
     );

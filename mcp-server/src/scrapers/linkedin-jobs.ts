@@ -73,13 +73,13 @@ export async function searchLinkedInJobs(args: {
       });
     }
 
-    // TODO Sprint 1.5.1: validate selectors against authenticated DOM via chrome-devtools-mcp + sandbox cookie.
-    // Best-known selectors as of 2025-2026 (LinkedIn DOM mudou várias vezes — fragile):
-    //   .jobs-search-results-list  OR  ul.jobs-search__results-list  OR  [data-test-id="job-search-results-list"]
-    // Job card: li.job-card-container OR li.scaffold-layout__list-item OR div.base-card
+    // Validated 2026-05-08 against authenticated DOM via inspect-jobs-dom.ts.
+    // Use 'attached' state (not 'visible') because LinkedIn lazy-loads cards
+    // via IntersectionObserver — the list container is in DOM but may not be
+    // visible until scrolled into view.
     await page.waitForSelector(
-      'ul.jobs-search__results-list, ul.scaffold-layout__list-container, [data-test-id="job-search-results-list"]',
-      { timeout: 15000 },
+      'div.base-card, li.job-card-container, ul.jobs-search__results-list',
+      { timeout: 30000, state: 'attached' },
     );
 
     const jobs: JobResult[] = await page.evaluate((maxN: number) => {

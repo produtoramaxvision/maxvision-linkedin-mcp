@@ -81,14 +81,26 @@ async function pollForLiAt(context: BrowserContext): Promise<string> {
 
 async function validateCookie(page: Page): Promise<boolean> {
   try {
-    await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 15000 });
+    await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    // Allow brief settle for client-side redirects.
+    await page.waitForTimeout(2000);
     const url = page.url();
-    if (url.includes('/authwall') || url.includes('/login') || url.includes('/checkpoint')) {
+    const isAuthRedirect =
+      url.includes('/authwall') ||
+      url.includes('/uas/login') ||
+      url.includes('/checkpoint') ||
+      url.includes('login-submit') ||
+      url.endsWith('/login') ||
+      url.endsWith('/login/');
+    if (isAuthRedirect) {
       log(`cookie rejected — redirected to ${url}`);
       return false;
     }
-    await page.waitForSelector('nav.global-nav, [data-test-global-nav]', { timeout: 15000 });
-    log('cookie validated via /feed');
+    if (!url.includes('linkedin.com')) {
+      log(`unexpected redirect off linkedin.com to ${url}`);
+      return false;
+    }
+    log(`cookie validated via URL=${url}`);
     return true;
   } catch (err) {
     log(`validation error: ${(err as Error).message}`);

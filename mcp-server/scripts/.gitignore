@@ -7,3 +7,5 @@
 *.li_at
 debug-*.json
 debug-*.png
+inspect-*.html
+inspect-*.json
