@@ -32,12 +32,14 @@
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
-export type ScrapingBackend = 'patchright' | 'scrapfly' | 'brightdata';
+export type ScrapingBackend = 'patchright' | 'scrapfly' | 'brightdata' | 'firecrawl';
 
 interface BackendConfig {
   backend: ScrapingBackend;
   scrapflyApiKey?: string;
   brightdataProxyUrl?: string;
+  firecrawlEndpoint?: string;
+  firecrawlApiKey?: string;
 }
 
 export function resolveScrapingBackend(): BackendConfig {
@@ -51,6 +53,20 @@ export function resolveScrapingBackend(): BackendConfig {
     const url = process.env['BRIGHTDATA_PROXY_URL'];
     if (!url) throw new AppError('CONFIG_FAIL', 'SCRAPING_BACKEND=brightdata but BRIGHTDATA_PROXY_URL unset');
     return { backend: 'brightdata', brightdataProxyUrl: url };
+  }
+  if (explicit === 'firecrawl') {
+    const endpoint = process.env['FIRECRAWL_ENDPOINT'];
+    if (!endpoint) {
+      throw new AppError(
+        'CONFIG_FAIL',
+        'SCRAPING_BACKEND=firecrawl but FIRECRAWL_ENDPOINT unset (e.g. https://firecrawl.your-vps.com)',
+      );
+    }
+    return {
+      backend: 'firecrawl',
+      firecrawlEndpoint: endpoint.replace(/\/$/, ''),
+      firecrawlApiKey: process.env['FIRECRAWL_API_KEY'] ?? '',
+    };
   }
   return { backend: 'patchright' };
 }
@@ -148,6 +164,81 @@ export function getBrightDataConfig(): { proxyUrl: string } | null {
 }
 
 /**
+ * Firecrawl self-hosted backend (Sprint 6.3).
+ *
+ * The user supplies their own Firecrawl deployment URL via FIRECRAWL_ENDPOINT.
+ * No paid plan needed — Firecrawl is open source. Optional FIRECRAWL_API_KEY
+ * for instances behind Bearer auth.
+ *
+ * Caveat: if the Firecrawl instance is on the same datacenter ASN as the MCP
+ * server, LinkedIn will return the same authwall. The bypass works only when
+ * the Firecrawl instance is in a different ASN, has external proxy
+ * configured, or has a residential IP. Document this in operator notes.
+ *
+ * Firecrawl API: POST /v1/scrape with `{url, formats:['html'], waitFor,
+ * headers:{Cookie}, proxy?:'auto'}`. Returns `{success, data:{html, metadata}}`.
+ */
+async function firecrawlFetch(args: ScrapeRequest, cfg: BackendConfig): Promise<ScrapeResult> {
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+  };
+  if (cfg.firecrawlApiKey) headers['authorization'] = `Bearer ${cfg.firecrawlApiKey}`;
+
+  const requestHeaders: Record<string, string> = {};
+  if (args.cookies && args.cookies.length > 0) {
+    requestHeaders['Cookie'] = args.cookies.map((c) => `${c.name}=${c.value}`).join('; ');
+  }
+  if (args.acceptLanguage) requestHeaders['Accept-Language'] = args.acceptLanguage;
+
+  const body = JSON.stringify({
+    url: args.url,
+    formats: ['html'],
+    onlyMainContent: false,
+    waitFor: 4000,
+    headers: requestHeaders,
+    // Firecrawl cloud honors `proxy: 'auto' | 'enhanced'`; self-hosted
+    // ignores unsupported keys silently — safe to send.
+    proxy: 'auto',
+  });
+
+  const res = await fetch(`${cfg.firecrawlEndpoint}/v1/scrape`, {
+    method: 'POST',
+    headers,
+    body,
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Firecrawl ${res.status}: ${errBody.slice(0, 300)}`,
+      { status: res.status, endpoint: cfg.firecrawlEndpoint },
+    );
+  }
+  const json = (await res.json()) as {
+    success?: boolean;
+    data?: {
+      html?: string;
+      markdown?: string;
+      metadata?: { sourceURL?: string; statusCode?: number; contentType?: string };
+    };
+    error?: string;
+  };
+  if (!json.success) {
+    throw new AppError('EXTERNAL_API_FAIL', `Firecrawl error: ${json.error ?? 'unknown'}`);
+  }
+  const html = json.data?.html ?? '';
+  const meta = json.data?.metadata ?? {};
+  return {
+    url: args.url,
+    status: meta.statusCode ?? 200,
+    html,
+    finalUrl: meta.sourceURL ?? args.url,
+    contentType: meta.contentType ?? 'text/html',
+    bytes: html.length,
+  };
+}
+
+/**
  * Top-level entry: route to the configured backend.
  *
  * Patchright path returns null (caller must use existing browserPool flow);
@@ -165,10 +256,13 @@ export async function scrape(args: ScrapeRequest): Promise<ScrapeResult | null> 
   if (cfg.backend === 'scrapfly') {
     return scrapflyFetch(args, cfg.scrapflyApiKey!);
   }
+  if (cfg.backend === 'firecrawl') {
+    return firecrawlFetch(args, cfg);
+  }
   if (cfg.backend === 'brightdata') {
     throw new AppError(
       'NOT_IMPLEMENTED',
-      'BrightData backend wiring lands in Sprint 6.2 (browserPool.connectOverCDP)',
+      'BrightData backend wiring lands in Sprint 6.4 (browserPool.connectOverCDP)',
     );
   }
   throw new AppError('CONFIG_FAIL', `Unknown SCRAPING_BACKEND: ${cfg.backend}`);

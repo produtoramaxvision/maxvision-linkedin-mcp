@@ -92,7 +92,36 @@ Web Store + Edge Add-ons + Firefox Add-ons.
 
 Sprint 7+ if we go this route.
 
-### Option D — Document the limitation, ship Free tier honest
+### Option D — Self-hosted Firecrawl (free if you already run it)
+
+If you operate a Firecrawl instance (open source, self-host) on the SAME or
+DIFFERENT VPS, set:
+
+```bash
+SCRAPING_BACKEND=firecrawl
+FIRECRAWL_ENDPOINT=https://firecrawl.your-vps.com
+FIRECRAWL_API_KEY=fc-xxx   # optional, only if your instance is auth'd
+```
+
+The `scrape()` adapter calls `POST {endpoint}/v1/scrape` with `formats:['html']`,
+`waitFor:4000`, `headers:{Cookie}`, `proxy:'auto'`. Returns rendered HTML for
+cheerio parsing — same downstream contract as Scrapfly path.
+
+**Caveat — won't always bypass authwall.** Firecrawl uses Playwright/
+Puppeteer locally; if the Firecrawl VPS is in the SAME ASN as the MCP
+server (or any other datacenter ASN LinkedIn flags), the authwall hits
+the same way. Bypass works only when:
+
+- Firecrawl is in a different ASN with cleaner IP reputation, OR
+- Firecrawl has external proxy/Tor configured upstream, OR
+- Firecrawl's `proxy: 'enhanced'` cloud feature is enabled (paid).
+
+Try it as a free first attempt; if authwall persists, escalate to Scrapfly
+or BrightData.
+
+Docs: <https://docs.firecrawl.dev/api-reference/endpoint/scrape>
+
+### Option E — Document the limitation, ship Free tier honest
 
 For job seekers who only need search + tracking + JobSpy aggregation, the
 current Patchright stack delivers everything they need. `/feed`,
