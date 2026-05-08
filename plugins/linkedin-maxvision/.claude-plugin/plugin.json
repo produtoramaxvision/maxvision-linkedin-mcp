@@ -1,0 +1,60 @@
+{
+  "name": "linkedin-maxvision",
+  "version": "0.1.0-sprint1",
+  "description": "LinkedIn automation suite for Claude Code: job search, profile lookup, application tracking. Anti-detect Patchright + ToS-aware. Free tier.",
+  "author": {
+    "name": "MaxVision Produtora",
+    "email": "produtoramaxvision@gmail.com",
+    "url": "https://produtoramaxvision.com.br"
+  },
+  "homepage": "https://linkedin.produtoramaxvision.com.br",
+  "repository": "https://github.com/produtoramaxvision/maxvision-linkedin-mcp",
+  "license": "AGPL-3.0",
+  "keywords": ["linkedin", "automation", "job-search", "career", "mcp", "patchright"],
+  "mcpServers": {
+    "linkedin-maxvision": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/../../mcp-server/dist/server.js"],
+      "env": {
+        "MCP_TRANSPORT": "stdio",
+        "NODE_ENV": "production",
+        "LOG_LEVEL": "info"
+      }
+    }
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "mcp__linkedin-maxvision__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-tool-use.sh"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "mcp__linkedin-maxvision__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-tool-use.sh",
+            "async": true
+          }
+        ]
+      }
+    ]
+  }
+}
