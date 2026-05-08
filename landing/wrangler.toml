@@ -1,18 +1,19 @@
 # ============================================================
 # Cloudflare Pages config — landing linkedin.produtoramaxvision.com.br
 #
-# Após deploy via `wrangler pages deploy`:
-#   1. Pages Dashboard → projeto linkedin-maxvision-landing → Custom domains
-#   2. Add custom domain: linkedin.produtoramaxvision.com.br
-#      (Pages cria CNAME automaticamente na zone produtoramaxvision.com.br)
-#   3. Settings → Environment Variables → adicionar:
+# Stack: HTML estatico + Tailwind CDN + Pages Functions (functions/api/waitlist.ts)
+# Sem build step — wrangler pages deploy envia o diretorio ./ direto.
+#
+# Apos primeiro deploy:
+#   1. Pages Dashboard ou MCP -> custom domain linkedin.produtoramaxvision.com.br
+#   2. Settings -> Environment Variables -> adicionar:
 #        RESEND_API_KEY     (encrypted)
 #        RESEND_AUDIENCE_ID (plain ou encrypted)
 # ============================================================
 name = "linkedin-maxvision-landing"
 compatibility_date = "2026-05-08"
 compatibility_flags = ["nodejs_compat"]
-pages_build_output_dir = "./dist"
+pages_build_output_dir = "."
 
 [vars]
 PUBLIC_SITE_URL = "https://linkedin.produtoramaxvision.com.br"

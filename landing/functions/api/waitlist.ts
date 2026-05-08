@@ -1,13 +1,14 @@
-import type { APIRoute } from "astro";
-
+/**
+ * Cloudflare Pages Function — POST /api/waitlist
+ * Body: { email: string }
+ * Action: append to Resend audience.
+ */
 interface Env {
   RESEND_API_KEY?: string;
   RESEND_AUDIENCE_ID?: string;
 }
 
-export const POST: APIRoute = async ({ request, locals }) => {
-  const env = (locals as { runtime?: { env: Env } }).runtime?.env ?? {};
-
+export const onRequestPost: PagesFunction<Env> = async ({ request, env }) => {
   let email: string;
   try {
     const body = (await request.json()) as { email?: string };
@@ -21,7 +22,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
   }
 
   if (!env.RESEND_API_KEY || !env.RESEND_AUDIENCE_ID) {
-    console.warn("Resend not configured; logging email", email);
+    console.warn("Resend not configured; logged email", email);
     return Response.json({ ok: true, mode: "dev" });
   }
 
@@ -45,5 +46,3 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   return Response.json({ ok: true });
 };
-
-export const prerender = false;
