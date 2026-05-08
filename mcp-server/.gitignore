@@ -1,0 +1,14 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.pnpm-store/
+.turbo/
+*.tsbuildinfo
+
+# Override global ignore — lockfile MUST be tracked for reproducible Docker builds
+!pnpm-lock.yaml
