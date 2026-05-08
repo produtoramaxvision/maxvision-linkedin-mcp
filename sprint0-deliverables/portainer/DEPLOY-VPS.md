@@ -209,11 +209,52 @@ Cada `accountId` no DB precisa ter cookie `li_at` válido encriptado.
 
 ### 8.1 — Capturar `li_at` do navegador
 
+A partir de Sprint 1.5.1 há dois caminhos. Prefira o automatizado (§8.2). O
+manual (§8.3) fica como escape hatch para quando o automatizado falhar.
+
+### 8.2 — Capturar via Claude Code (recomendado)
+
+No Claude Code (com plugin `linkedin-maxvision` instalado + `MAXVISION_API_KEY`
+no env do laptop):
+
+```
+/linkedin-cookie-refresh
+```
+
+Janela do navegador abre apontando para LinkedIn login. Faça login normalmente
+(senha + 2FA se houver). O script captura o `li_at`, valida via `/feed`,
+e POSTa o cookie cru ao servidor — que encripta com AES-256-GCM (`MASTER_KEY`
+nunca sai da VPS) e grava em `accounts.cookie_encrypted`.
+
+Pré-requisitos one-time no laptop:
+
+- Node 20+
+- `cd mcp-server && pnpm install` (instala `patchright` e `tsx`)
+- Chromium do Patchright: `cd mcp-server && npx patchright install chromium`
+- Env var `MAXVISION_API_KEY` setada com uma key válida do `MCP_API_KEYS` do stack
+
+Argumentos opcionais:
+
+```
+/linkedin-cookie-refresh --account-id sandbox-01 --display-name "Sandbox 01" --expires-days 90
+```
+
+Tempo total: 30-60s (depende do quanto você demora para logar).
+
+Exit codes do script (relayed pelo comando ao usuário): ver
+`plugins/linkedin-maxvision/commands/linkedin-cookie-refresh.md`.
+
+### 8.3 — Manual SQL (fallback avançado)
+
+Use só se §8.2 falhar de forma reproduzível (Patchright corrompido, sem rede,
+debug). Requer acesso SSH/Portainer console e o `MASTER_KEY` do stack — risco
+operacional muito maior.
+
+Capturar o cookie:
+
 1. Login na sua conta LinkedIn (preferencialmente CONTA SANDBOX, não principal)
 2. DevTools → Application → Cookies → `https://www.linkedin.com`
 3. Localizar cookie `li_at`. Copiar o valor (string ~150 chars)
-
-### 8.2 — Encriptar e inserir no DB
 
 Opção A (script utilitário no laptop, fora da VPS):
 
@@ -245,7 +286,7 @@ ON CONFLICT (id) DO UPDATE SET
   updated_at = NOW();
 ```
 
-### 8.3 — Testar scraper real
+### 8.4 — Testar scraper real
 
 ```bash
 curl -X POST https://linkedin-mcp.produtoramaxvision.com.br/mcp \
@@ -260,7 +301,7 @@ Se retornar:
 - AppError code `COOKIE_EXPIRED` → cookie inválido, recapturar
 - AppError code `CAPTCHA_DETECTED` → conta sinalizada, parar 24h e refresh cookie
 
-### 8.4 — Rate-limit conservador Sprint 1.5
+### 8.5 — Rate-limit conservador Sprint 1.5
 
 **IMPORTANTE:** Sprint 1.5 ainda é beta. LinkedIn detecta automação.
 

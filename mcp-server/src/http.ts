@@ -30,14 +30,35 @@
  * with `server.ts` either, to avoid a circular import (server.ts already
  * imports startHttpServer from this file).
  */
+import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
+import { sql } from 'drizzle-orm';
+import { z } from 'zod';
 import { logger } from './logger.js';
 import { authenticateApiKey } from './auth/api-key.js';
+import { encryptCookie } from './auth/cookies.js';
+import { db } from './db/client.js';
+import { accounts, auditLog } from './db/schema.js';
 import { registerAllTools } from './tools/_registry.js';
 import { browserPool } from './browser/pool.js';
+
+/**
+ * Body schema for POST /admin/account-cookie.
+ *
+ * `accountId` constrained to slug-shaped chars so it embeds cleanly in URLs
+ * and audit log filters. `cookieValue` width 80..500 matches typical `li_at`
+ * lengths (LinkedIn issues ~150-char tokens; cap protects against accidental
+ * pastes of much larger blobs).
+ */
+const AdminCookieBodySchema = z.object({
+  accountId: z.string().min(1).max(100).regex(/^[a-z0-9_-]+$/),
+  displayName: z.string().min(1).max(200).optional(),
+  cookieValue: z.string().min(80).max(500),
+  expiresInDays: z.number().int().min(1).max(365).default(90),
+});
 
 const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
@@ -85,6 +106,71 @@ export async function startHttpServer(port: number): Promise<void> {
     return c.text(lines.join('\n') + '\n', 200, {
       'content-type': 'text/plain; version=0.0.4',
     });
+  });
+
+  // Admin: persist a fresh `li_at` cookie for an account. Reuses the same
+  // API-key auth as /mcp. Body never logged; only a SHA-256[:16] of the
+  // *encrypted* blob lands in audit_log (see Sprint 1.5.1 spec).
+  //
+  // Mounted BEFORE /mcp so routing is unambiguous. Stateless: no MCP
+  // handshake, no transport machinery — just JSON in, JSON out.
+  app.post('/admin/account-cookie', async (c) => {
+    const auth = await authenticateApiKey(c.req.raw);
+    if (!auth.ok) {
+      logger.warn({ reason: auth.reason }, 'auth fail on /admin/account-cookie');
+      return c.json({ error: 'unauthorized', message: auth.reason }, 401);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const parsed = AdminCookieBodySchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(
+        { error: 'validation_fail', details: parsed.error.flatten() },
+        400,
+      );
+    }
+
+    const { accountId, displayName, cookieValue, expiresInDays } = parsed.data;
+    const blob = encryptCookie(cookieValue);
+    const expiresAt = new Date(Date.now() + expiresInDays * 86400 * 1000);
+
+    await db
+      .insert(accounts)
+      .values({
+        id: accountId,
+        displayName: displayName ?? 'Default Account',
+        cookieEncrypted: blob,
+        cookieExpiresAt: expiresAt,
+      })
+      .onConflictDoUpdate({
+        target: accounts.id,
+        set: {
+          displayName: displayName ?? sql`${accounts.displayName}`,
+          cookieEncrypted: blob,
+          cookieExpiresAt: expiresAt,
+          updatedAt: new Date(),
+          status: 'active',
+        },
+      });
+
+    // Audit (best-effort, hash of the *encrypted* blob only — never the
+    // plaintext cookie). LGPD: input/output are never persisted in clear.
+    const blobSha = createHash('sha256').update(blob).digest('hex').slice(0, 16);
+    db.insert(auditLog)
+      .values({
+        tool: 'admin.cookie_refresh',
+        accountId,
+        inputHash: blobSha,
+        success: true,
+      })
+      .catch((err: unknown) => {
+        logger.warn(
+          { err: (err as Error).message, accountId },
+          'audit_log insert failed (admin.cookie_refresh)',
+        );
+      });
+
+    return c.json({ accountId, expiresAt: expiresAt.toISOString() });
   });
 
   // MCP endpoint — authenticated. We pass `c.req.raw` (the underlying

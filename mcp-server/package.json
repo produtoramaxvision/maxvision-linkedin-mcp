@@ -16,7 +16,8 @@
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "capture-cookie": "tsx scripts/capture-cookie.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",

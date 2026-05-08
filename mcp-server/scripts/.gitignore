@@ -1,0 +1,9 @@
+# Local Patchright persistent profile created by capture-cookie.ts.
+# Contains LinkedIn session state (cookies, localStorage) — never commit.
+.cookie-capture-profile/
+
+# Dev scratch — debug dumps, captured cookies in plaintext, screenshots.
+*.cookie.txt
+*.li_at
+debug-*.json
+debug-*.png

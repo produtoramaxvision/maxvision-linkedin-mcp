@@ -1,71 +1,98 @@
 ---
 name: linkedin-cookie-refresh
-description: Re-importa o cookie li_at do LinkedIn quando expirado
-argument-hint: [paste-li_at-value-here]
-allowed-tools: []
+description: Captura cookie li_at LinkedIn via login interativo no navegador local e persiste no servidor MCP
+argument-hint: [--account-id default]
+allowed-tools: Bash
 ---
 
-Você está guiando o usuário pelo processo de re-importar o cookie `li_at` do LinkedIn quando ele expirou ou foi invalidado.
+Você está executando o fluxo automatizado de captura/refresh do cookie `li_at` do LinkedIn (Sprint 1.5.1).
 
-# Status Sprint 1
+A heavy lifting é feita por `mcp-server/scripts/capture-cookie.ts`. Sua tarefa aqui:
 
-> O tool MCP admin `update_cookie` chega na **Sprint 1.5**. Na Free tier atual o procedimento é manual via SQL. O `allowed-tools` deste comando está vazio de propósito.
+1. Validar pré-requisitos no laptop do usuário
+2. Disparar o script via Bash em foreground
+3. Reportar resultado de forma legível
 
-# Workflow — extrair o cookie
+# Pré-requisitos
 
-Guie o usuário, passo-a-passo:
+O usuário precisa ter no laptop:
 
-1. Abra o LinkedIn em qualquer navegador (Chrome/Firefox/Edge) e faça login normalmente.
-
-2. Abra o DevTools:
-   - Chrome/Edge: `F12` ou `Ctrl+Shift+I`
-   - Firefox: `F12`
-
-3. Navegue para:
-   - Chrome/Edge: aba **Application** → **Storage** → **Cookies** → `https://www.linkedin.com`
-   - Firefox: aba **Storage** → **Cookies** → `https://www.linkedin.com`
-
-4. Localize o cookie chamado **`li_at`**.
-
-5. Clique no valor e copie tudo (string longa começando com `AQE...`).
-
-   > **Atenção:** esse cookie é equivalente ao seu login. Não compartilhe, não cole em chat público, não envie por email. Trate como senha.
-
-# Workflow — atualizar o servidor (Sprint 1, manual)
-
-Como o tool admin ainda não existe, o usuário precisa rodar SQL direto:
-
-```bash
-# 1. Encriptar o novo cookie (helper já existe no mcp-server)
-cd mcp-server
-node -e "
-  const { encryptCookie } = require('./dist/auth/cookie.js');
-  console.log(encryptCookie(process.argv[1]));
-" "<COLE_AQUI_O_li_at>"
-
-# 2. Atualizar no banco
-psql \"\$DATABASE_URL\" -c \"
-  UPDATE accounts
-  SET cookie_li_at = '<output_do_passo_1>',
-      cookie_updated_at = NOW(),
-      cookie_expires_at = NOW() + INTERVAL '60 days'
-  WHERE id = 'default';
-\"
-
-# 3. Validar
-psql "$DATABASE_URL" -c "SELECT id, cookie_updated_at, cookie_expires_at FROM accounts WHERE id = 'default';"
-```
-
-Depois, rode `/linkedin-status` para confirmar que o probe retorna `account_status: healthy`.
+- Node 20+ (`node --version`)
+- `MAXVISION_API_KEY` no env (a mesma key configurada no Claude Code para falar com o servidor MCP)
+- Chromium do Patchright instalado uma vez: `npx patchright install chromium`
 
 # Workflow desta sessão
 
-1. **Não** chame nenhum tool MCP — `allowed-tools` está vazio.
-2. Se o usuário colar o `li_at` em chat, **avise** que valor secreto não deve ficar em transcrição persistida e ofereça redigir após uso.
-3. Mostre os comandos SQL/node acima como bloco que o usuário copia e roda no terminal dele — você não executa nada.
+## 1. Verificar `MAXVISION_API_KEY`
 
-# Constraints
+Rode (Bash):
 
-- **Nunca** ecoe o valor do `li_at` na resposta — sempre redirija para `<COLE_AQUI_O_li_at>`.
-- Sprint 1.5 substituirá esse fluxo manual por `mcp__linkedin-maxvision__update_cookie` (admin tool, requer auth local).
-- Se o usuário usar 2FA, o procedimento é o mesmo — o `li_at` válido captura a sessão pós-2FA.
+```bash
+test -n "$MAXVISION_API_KEY" && echo "API_KEY_SET" || echo "API_KEY_MISSING"
+```
+
+Se aparecer `API_KEY_MISSING`:
+- Avise o usuário que precisa exportar `MAXVISION_API_KEY` (PowerShell `[Environment]::SetEnvironmentVariable("MAXVISION_API_KEY", "mxv_xxx", "User")` e reabrir o terminal, ou bash `export MAXVISION_API_KEY=mxv_xxx`).
+- Não prossiga.
+
+NUNCA ecoe o valor da key na resposta — apenas confirme presença/ausência.
+
+## 2. Garantir dependências do mcp-server
+
+Se `mcp-server/node_modules/` não existir, rode:
+
+```bash
+cd mcp-server && pnpm install --ignore-workspace
+```
+
+## 3. Disparar a captura
+
+Comando principal (substitua `$ARGUMENTS` pelo argumento passado pelo usuário, ou use defaults):
+
+```bash
+cd mcp-server && pnpm capture-cookie $ARGUMENTS
+```
+
+Defaults se o usuário não passar nada: `--account-id default --display-name "Default Account" --expires-days 90`.
+
+O script:
+- Abre uma janela do Chrome apontando para `linkedin.com/login`
+- Aguarda o usuário fazer login (até 5 min, com mensagens de progresso a cada 30s)
+- Detecta o cookie `li_at`, valida via `/feed`
+- POSTa o cookie cru ao servidor MCP em `https://linkedin-mcp.produtoramaxvision.com.br/admin/account-cookie` (HTTPS — única vez que o cookie trafega em claro)
+- Servidor encripta com AES-256-GCM e grava em `accounts.cookie_encrypted`
+- Browser é fechado, exit 0 com linha `OK account=<id> cookie_expires=<iso>`
+
+## 4. Interpretar exit code
+
+| Exit | Significado | Ação |
+|---|---|---|
+| 0 | Sucesso | Reporte a linha `OK …` ao usuário e sugira `/linkedin-status` |
+| 2 | `MAXVISION_API_KEY` ausente | Re-instrua o passo 1 |
+| 3 | Login timeout (5 min) | Pergunte se quer retentar |
+| 4 | Cookie validação falhou 2x | Conta pode estar flagged — sugerir 24h de pausa |
+| 5 | Servidor 4xx | Mostre o body do erro (key inválida ou body malformado) |
+| 6 | Servidor 5xx persistente | Cheque `/health` e `/linkedin-status`; pode ser DB/Postgres |
+| 7 | Patchright falhou ao iniciar | Instrua: `cd mcp-server && npx patchright install chromium` |
+
+## 5. Constraints de segurança
+
+- **Nunca** ecoe o valor do `li_at` na resposta. O script já cuida de não imprimir; você só pode mostrar `length=N` se aparecer no stdout.
+- Se o usuário colar o `li_at` direto no chat por engano, **avise** que o fluxo automatizado não precisa disso e sugira limpar a transcrição.
+- Se Chromium pedir credenciais salvas pelo Chrome do sistema (perfil persistente em `mcp-server/.cookie-capture-profile/`), tudo bem — esse diretório fica em `scripts/.gitignore`.
+
+## 6. Pós-sucesso
+
+Sugira ao usuário:
+
+```
+/linkedin-status
+```
+
+para confirmar que `account_status: healthy` e o probe aprova o cookie recém-capturado.
+
+# Notas operacionais
+
+- O script roda em **foreground** (aguarda o usuário logar manualmente). Não rode em background.
+- Em Windows com PowerShell, `cd mcp-server && pnpm …` funciona (Bash tool usa POSIX shell). Não use `;` separator do PowerShell.
+- O fluxo manual SQL (Sprint 1) ainda existe em `sprint0-deliverables/portainer/DEPLOY-VPS.md` §8.3 como escape hatch. Use só se este comando falhar repetidamente.
