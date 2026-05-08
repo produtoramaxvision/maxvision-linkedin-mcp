@@ -19,6 +19,10 @@ export type ErrorCode =
   | 'CACHE_MISS'
   | 'VALIDATION_FAIL'
   | 'UPSTREAM_FAIL'
+  | 'CONFIG_FAIL'
+  | 'EXTERNAL_API_FAIL'
+  | 'NOT_IMPLEMENTED'
+  | 'CONFIRMATION_REQUIRED'
   | 'UNKNOWN';
 
 export class AppError extends Error {

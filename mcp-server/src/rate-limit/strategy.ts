@@ -18,14 +18,24 @@ export type Action =
   | 'get_profile'
   | 'get_job_details'
   | 'track_application'
-  | 'send_message';
+  | 'send_message'
+  | 'apply_easy'
+  | 'optimize_profile'
+  | 'list_feed'
+  | 'post_update'
+  | 'search_people';
 
 const POLICY: Record<Action, { capacity: number; refillRate: number }> = {
   search_jobs: { capacity: 10, refillRate: 0.1 },        // 10 burst, ~6/min sustained
   get_profile: { capacity: 5, refillRate: 0.05 },        // 5 burst, ~3/min sustained
   get_job_details: { capacity: 20, refillRate: 0.3 },    // higher — read-only listing page
   track_application: { capacity: 100, refillRate: 1 },   // local DB write, lenient
-  send_message: { capacity: 3, refillRate: 0.01 },       // very strict (Sprint 2)
+  send_message: { capacity: 3, refillRate: 0.01 },       // very strict — write surface
+  apply_easy: { capacity: 5, refillRate: 0.02 },         // strict — write surface, ban risk
+  optimize_profile: { capacity: 5, refillRate: 0.05 },   // calls Claude API, capped
+  list_feed: { capacity: 10, refillRate: 0.1 },          // read-only, moderate
+  post_update: { capacity: 3, refillRate: 0.005 },       // very strict — public post
+  search_people: { capacity: 5, refillRate: 0.05 },      // strict — Sales Nav surface
 };
 
 export async function checkRateLimit(
