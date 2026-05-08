@@ -8,18 +8,66 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ### Pending (per `docs/ROADMAP.md`)
 
-- **Sprint 2:** `apply_easy`, `send_message`, `optimize_profile`, `list_feed`,
-  `post_update`, `search_people` — schemas and design ready, handlers TBD.
-  Each requires careful safety (confirm flow), LinkedIn ToS review, and tests
-  in a sandbox account.
-- **Sprint 2:** LinkedIn voyager API integration via `tomquirk/linkedin-api`
-  Python wrapper to bypass `/in/<slug>` server-side authwall (validated as
-  blocking even for authenticated cookie sets).
-- **Sprint 3:** Cloudflare Worker license server + Stripe webhook gating
-  (Free vs Pro vs Agency).
-- **Sprint 4:** Public landing + Stripe checkout + v1.0 release.
-- **Sprint 5:** Variant B — n8n workflows + Agency multi-tenant.
-- **Sprint 6:** Polish + telemetry + bug-fix cycles.
+- **Sprint 3 deploy:** wrangler deploy + Stripe products + DNS for the
+  license worker (code ships in v0.2.0, deployment is operator-side).
+- **Sprint 4:** Public landing + Stripe checkout flow + v1.0 release tag.
+- **Sprint 5.5:** Tier Agency white-label + multi-tenant cookie pool.
+- **Sprint 6:** Polish — Playwright E2E suite, anti-detect tuning,
+  documentation videos, monitoring dashboards.
+
+---
+
+## [v0.2.0] — 2026-05-08
+
+### Added
+
+- **Sprint 2 — 6 new MCP tools** registered, bringing total surface to 10
+  per blueprint PLAN-A:
+  - `list_feed`: read recent activity from /feed.
+  - `search_people`: search /search/results/people (Pro tier in Sprint 3).
+  - `optimize_profile`: Claude Messages API analysis vs target role.
+    Requires `ANTHROPIC_API_KEY` env. Uses claude-haiku-4-5 (cost-conscious).
+  - `post_update`: feed post composer with `confirm` gate.
+  - `send_message`: DM/InMail with `confirm` gate.
+  - `apply_easy`: Easy Apply flow with `confirm` gate. Preview captures
+    screening questions; confirm submits up to 5 paginated steps.
+- All write surfaces gate behind required `confirm: boolean` (default false →
+  dry-run preview). LinkedIn ban-risk surface — mistakes are opt-in only.
+- Rate-limit policies tuned per tool: post_update (3 burst / 0.005 refill),
+  apply_easy (5 / 0.02), send_message (3 / 0.01), reads moderate.
+- Error code union extended: `CONFIG_FAIL`, `EXTERNAL_API_FAIL`,
+  `NOT_IMPLEMENTED`, `CONFIRMATION_REQUIRED`.
+
+- **Sprint 3.1 — Cloudflare Worker license server** (`workers/license/`):
+  - `POST /v1/check`  — KV lookup, expiry check, revocation status.
+  - `POST /v1/issue`  — Stripe webhook → emit `MAXV-{PRO|AGENCY}-{HEX32}`.
+  - `POST /v1/revoke` — admin only (`Bearer ADMIN_TOKEN`).
+  - Constant-time HMAC-SHA256 Stripe signature verification.
+  - KV TTL = expiresInDays + 1 day (auto-cleanup post-expiry).
+
+- **Sprint 3.3 — License gate module** (`src/auth/license.ts`):
+  - `gateToolByLicense(toolName, licenseHeader)` — returns null if allowed,
+    string reason if blocked.
+  - 5-min in-memory cache keyed by license key.
+  - Free dev mode: `LICENSE_CHECK_ENABLED` unset → all tools allowed.
+  - Pro tools: `apply_easy`, `send_message`, `search_people`, `post_update`.
+
+- **Sprint 5.1+5.2 — Webhook routes + SSE** in `mcp-server/src/http.ts`:
+  - `POST /webhooks/job-found`     (n8n inbound, `X-Webhook-Secret` auth).
+  - `POST /webhooks/recruiter-msg` (n8n inbound).
+  - `GET  /events`                 (SSE — connect event + 30 s heartbeat).
+  - All gated by `WEBHOOK_SECRET` env (when unset → 503 webhooks_disabled).
+
+- **Sprint 5.3 — 4 n8n workflow JSONs** in
+  `plugins/linkedin-maxvision/n8n-workflows/`:
+  - `linkedin-daily-scan.json` — cron 09:00 → search_jobs → Telegram.
+  - `linkedin-batch-apply.json` — webhook → apply_easy → Google Sheets log.
+  - `linkedin-recruiter-reply.json` — webhook → Claude draft → Telegram review.
+  - `linkedin-profile-weekly-audit.json` — cron Mon 08:00 → optimize_profile → Notion.
+
+- **Sprint 5.4 — `/linkedin-setup-n8n` command** that imports the 4 JSONs
+  into a target n8n instance via REST API, validates access first, lists
+  required env vars + credentials, activates after configuration.
 
 ---
 
