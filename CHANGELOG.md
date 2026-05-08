@@ -6,6 +6,41 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-provider LLM support** (`mcp-server/src/auth/llm-provider.ts`):
+  `optimize_profile` now resolves LLM credentials in this order:
+  1. `LLM_PROVIDER` env explicit override (`anthropic|openrouter|openai`).
+  2. `OPENROUTER_API_KEY` set → use OpenRouter (preferred; unified access to
+     300+ models including all Claude, GPT, Gemini, Llama, Mistral).
+  3. `ANTHROPIC_API_KEY` set → direct Anthropic Messages API.
+  4. `OPENAI_API_KEY` set → direct OpenAI chat.completions.
+  - `LLM_MODEL` env overrides the default model name. Defaults:
+    `anthropic/claude-haiku-4.5` (OpenRouter), `claude-haiku-4-5-20251001`
+    (Anthropic direct), `gpt-4o-mini` (OpenAI).
+  - OpenRouter requests include `HTTP-Referer` + `X-Title` headers for
+    rankings on openrouter.ai.
+
+### LinkedIn server-side reality
+
+`get_profile`, `list_feed`, `search_people` hit `auth_wall_desktop_*` server-
+side even with full multi-cookie auth. Root cause: LinkedIn 2026 fingerprints
+TLS/HTTP2 + browser canvas/WebGL aggressively, and rejects server-side
+Linux Chromium + xvfb headed regardless of cookie set. The voyager REST
+endpoints used by `tomquirk/linkedin-api==2.3.1` are deprecated (HTTP 410).
+
+**What does work server-side** (validated):
+- `/jobs/search/?keywords=...` (guest layout, pageKey `d_jobs_guest_search`).
+- `/jobs/view/<id>` (guest layout, pageKey `d_jobs_guest_details`).
+
+**What needs Sprint 6 future work:**
+- Custom `voyager/api/graphql` client with captured queryIds (
+  `voyagerIdentityGraphQL.{hash}`) — fragile (hashes rotate), needs HAR
+  capture from a fresh logged-in browser session.
+- OR proxy infrastructure (BrightData, ScrapFly residential proxies).
+- OR browser-extension delivery model (run the scraping path on the user's
+  own machine where their fingerprint is already trusted).
+
 ### Pending (per `docs/ROADMAP.md`)
 
 - **Sprint 3 deploy:** wrangler deploy + Stripe products + DNS for the
