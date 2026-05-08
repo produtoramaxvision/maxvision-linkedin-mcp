@@ -121,7 +121,63 @@ or BrightData.
 
 Docs: <https://docs.firecrawl.dev/api-reference/endpoint/scrape>
 
-### Option E — Document the limitation, ship Free tier honest
+### Option E — Apify Actors (LinkedIn-specialized, residential proxy)
+
+Apify hosts third-party actors specialized per LinkedIn surface. Each task
+maps to a different actor (validated default mapping):
+
+| URL pattern | Default actor | Override env |
+|---|---|---|
+| `/in/<slug>` | `dev_fusion~linkedin-profile-scraper` | `APIFY_ACTOR_PROFILE` |
+| `/feed` | `curious_coder~linkedin-post-search-scraper` | `APIFY_ACTOR_FEED` |
+| `/search/results/people` | `curious_coder~linkedin-people-finder` | `APIFY_ACTOR_PEOPLE` |
+| any other | `apify~web-scraper` | `APIFY_ACTOR_DEFAULT` |
+
+```bash
+SCRAPING_BACKEND=apify
+APIFY_TOKEN=apify_api_xxx
+# optional override:
+APIFY_ACTOR_PROFILE=dev_fusion~linkedin-profile-scraper
+```
+
+Pricing: $5/mo free credits (≈ 1k profile scrapes), then $5–$50/mo plans.
+Each actor uses residential proxy + cookie injection internally — bypasses
+authwall reliably.
+
+Caveat: Apify returns the actor's STRUCTURED dataset items (already-parsed
+profile/job/post objects), not raw HTML. The adapter wraps the JSON inside
+a `<script type="application/json" id="apify-dataset">` tag so the cheerio
+pipeline still runs; per-tool adapters can switch on this marker to pull
+structured data directly. Sprint 7 will add a clean `ScrapeResult.json` field
+to skip the cheerio detour.
+
+Docs: <https://docs.apify.com/api/v2#/reference/actors/run-actor-synchronously-and-get-dataset-items>
+LinkedIn actor catalog: <https://apify.com/store?search=linkedin>
+
+### Option F — Tavily Extract (content-only, optimize_profile)
+
+Tavily Extract API returns pre-processed markdown/text optimized for LLM
+consumption (`raw_content`). Wired into `optimize_profile` only — when the
+caller passes `profileUrl` instead of `profileText`, the tool calls Tavily
+to extract public-page content automatically.
+
+```bash
+TAVILY_API_KEY=tvly-xxx
+# optimize_profile auto-uses Tavily when profileUrl supplied + key set.
+```
+
+Pricing: 1k free credits/mo. Cheap for occasional profile audits; not viable
+for high-volume scraping.
+
+Caveat: Tavily fetches PUBLIC web pages only — no cookie injection, no
+authwall bypass. Works on public profile previews, public posts, and any
+other URL that a logged-out browser can fetch. Authenticated LinkedIn pages
+will return whatever the public preview shows (often a partial profile
+header + login CTA).
+
+Docs: <https://docs.tavily.com/api-reference/endpoint/extract>
+
+### Option G — Document the limitation, ship Free tier honest
 
 For job seekers who only need search + tracking + JobSpy aggregation, the
 current Patchright stack delivers everything they need. `/feed`,

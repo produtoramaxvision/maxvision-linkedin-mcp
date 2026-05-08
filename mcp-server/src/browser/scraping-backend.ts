@@ -32,7 +32,12 @@
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
-export type ScrapingBackend = 'patchright' | 'scrapfly' | 'brightdata' | 'firecrawl';
+export type ScrapingBackend =
+  | 'patchright'
+  | 'scrapfly'
+  | 'brightdata'
+  | 'firecrawl'
+  | 'apify';
 
 interface BackendConfig {
   backend: ScrapingBackend;
@@ -40,6 +45,29 @@ interface BackendConfig {
   brightdataProxyUrl?: string;
   firecrawlEndpoint?: string;
   firecrawlApiKey?: string;
+  apifyToken?: string;
+}
+
+/**
+ * Map URL pattern → Apify actor id. Apify ships specialized LinkedIn actors
+ * per task; this mapping lets the generic scrape() entrypoint pick the right
+ * one. Fallback: `apify/web-scraper` for arbitrary URLs (raw HTML output).
+ *
+ * Operator can override via APIFY_ACTOR_PROFILE / APIFY_ACTOR_FEED /
+ * APIFY_ACTOR_PEOPLE / APIFY_ACTOR_DEFAULT env vars to use a paid third-
+ * party actor (e.g. `dev_fusion/linkedin-profile-scraper`).
+ */
+function pickApifyActor(url: string): string {
+  if (/linkedin\.com\/in\//.test(url)) {
+    return process.env['APIFY_ACTOR_PROFILE'] ?? 'dev_fusion~linkedin-profile-scraper';
+  }
+  if (/linkedin\.com\/feed/.test(url)) {
+    return process.env['APIFY_ACTOR_FEED'] ?? 'curious_coder~linkedin-post-search-scraper';
+  }
+  if (/linkedin\.com\/search\/results\/people/.test(url)) {
+    return process.env['APIFY_ACTOR_PEOPLE'] ?? 'curious_coder~linkedin-people-finder';
+  }
+  return process.env['APIFY_ACTOR_DEFAULT'] ?? 'apify~web-scraper';
 }
 
 export function resolveScrapingBackend(): BackendConfig {
@@ -67,6 +95,13 @@ export function resolveScrapingBackend(): BackendConfig {
       firecrawlEndpoint: endpoint.replace(/\/$/, ''),
       firecrawlApiKey: process.env['FIRECRAWL_API_KEY'] ?? '',
     };
+  }
+  if (explicit === 'apify') {
+    const token = process.env['APIFY_TOKEN'];
+    if (!token) {
+      throw new AppError('CONFIG_FAIL', 'SCRAPING_BACKEND=apify but APIFY_TOKEN unset');
+    }
+    return { backend: 'apify', apifyToken: token };
   }
   return { backend: 'patchright' };
 }
@@ -178,6 +213,73 @@ export function getBrightDataConfig(): { proxyUrl: string } | null {
  * Firecrawl API: POST /v1/scrape with `{url, formats:['html'], waitFor,
  * headers:{Cookie}, proxy?:'auto'}`. Returns `{success, data:{html, metadata}}`.
  */
+/**
+ * Apify run-sync-get-dataset-items (Sprint 6.4).
+ *
+ * Apify ships specialized LinkedIn actors (profile/jobs/feed/people).
+ * pickApifyActor() routes the URL to the right actor; operator can override
+ * via APIFY_ACTOR_* envs to swap to a paid third-party actor.
+ *
+ * Endpoint: POST /v2/acts/{actorId}/run-sync-get-dataset-items?token=$T
+ *   Body = actor INPUT JSON (varies per actor; we pass `{startUrls,
+ *   includeUnlistedJobs, cookies, ...}` which most LinkedIn actors accept).
+ *   Returns JSON array of dataset items.
+ *
+ * Caveat: Apify's response shape is per-actor — items may already be the
+ * structured profile/job/post object. We synthesize a `ScrapeResult` shape
+ * with `html: JSON.stringify(items)` so cheerio still works on the raw
+ * payload (selecting via JSON-encoded heuristics) OR, for a cleaner path,
+ * future Sprint can add a `ScrapeResult.json?: unknown` field and let the
+ * caller branch.
+ */
+async function apifyFetch(args: ScrapeRequest, cfg: BackendConfig): Promise<ScrapeResult> {
+  const actorId = pickApifyActor(args.url);
+  const url =
+    `https://api.apify.com/v2/acts/${encodeURIComponent(actorId)}/run-sync-get-dataset-items` +
+    `?token=${encodeURIComponent(cfg.apifyToken!)}&format=json`;
+
+  const cookieMap: Record<string, string> = {};
+  if (args.cookies) for (const c of args.cookies) cookieMap[c.name] = c.value;
+
+  // Generic input shape compatible with most LinkedIn actors (web-scraper,
+  // dev_fusion/linkedin-profile-scraper, curious_coder/*). Operator-specific
+  // tuning can be done by overriding the actor and adjusting actor settings
+  // in the Apify console.
+  const input = {
+    startUrls: [{ url: args.url }],
+    cookies: cookieMap,
+    proxyConfiguration: { useApifyProxy: true, apifyProxyGroups: ['RESIDENTIAL'] },
+    maxRequestsPerCrawl: 1,
+    waitForFinishMs: 30000,
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Apify ${res.status} (actor ${actorId}): ${errBody.slice(0, 300)}`,
+      { status: res.status, actorId },
+    );
+  }
+  const items = (await res.json()) as Array<Record<string, unknown>>;
+  // Synthesize HTML wrapper so the existing cheerio pipeline can still
+  // run — the pipeline can switch on json-encoded markers if needed.
+  const payload = JSON.stringify(items);
+  return {
+    url: args.url,
+    status: 200,
+    html: `<script type="application/json" id="apify-dataset">${payload}</script>`,
+    finalUrl: args.url,
+    contentType: 'application/json',
+    bytes: payload.length,
+  };
+}
+
 async function firecrawlFetch(args: ScrapeRequest, cfg: BackendConfig): Promise<ScrapeResult> {
   const headers: Record<string, string> = {
     'content-type': 'application/json',
@@ -258,6 +360,9 @@ export async function scrape(args: ScrapeRequest): Promise<ScrapeResult | null> 
   }
   if (cfg.backend === 'firecrawl') {
     return firecrawlFetch(args, cfg);
+  }
+  if (cfg.backend === 'apify') {
+    return apifyFetch(args, cfg);
   }
   if (cfg.backend === 'brightdata') {
     throw new AppError(

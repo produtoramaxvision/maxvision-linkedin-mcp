@@ -11,6 +11,7 @@
 import { withInstrumentation } from './_base.js';
 import { OptimizeProfileInputSchema, type OptimizeProfileInput } from './schemas.js';
 import { invokeLlm } from '../auth/llm-provider.js';
+import { tavilyExtract } from '../browser/content-extract.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
@@ -49,11 +50,33 @@ export const optimizeProfile = withInstrumentation<OptimizeProfileInput, Optimiz
     'Analyze a LinkedIn profile against a target role using Claude (Sprint 2). Requires ANTHROPIC_API_KEY env on the MCP server.',
   inputSchema: OptimizeProfileInputSchema,
   handler: async ({ input, accountId }) => {
-    const profileText = input.profileText;
+    // Resolve profile text:
+    // 1. Use input.profileText if supplied (manual paste, fastest path).
+    // 2. Else if input.profileUrl + TAVILY_API_KEY is set, call Tavily Extract
+    //    for public-page content extraction (markdown). LinkedIn protected
+    //    pages still authwall server-side; Tavily works on public profile
+    //    previews + public posts.
+    // 3. Else fail VALIDATION_FAIL with a clear hint.
+    let profileText = input.profileText;
+    if (!profileText && input.profileUrl) {
+      try {
+        const extracted = await tavilyExtract([input.profileUrl]);
+        profileText = extracted[0]?.rawContent;
+        logger.info(
+          { accountId, profileUrl: input.profileUrl, len: profileText?.length ?? 0 },
+          'optimize_profile tavily extract ok',
+        );
+      } catch (err) {
+        logger.warn(
+          { err: (err as Error).message, profileUrl: input.profileUrl },
+          'tavily extract failed, falling back to manual profileText requirement',
+        );
+      }
+    }
     if (!profileText) {
       throw new AppError(
         'VALIDATION_FAIL',
-        'Either profileText must be supplied OR Sprint 6 GraphQL profile fetch must be wired (TBD).',
+        'Supply profileText directly OR set TAVILY_API_KEY env + pass profileUrl to enable auto-extract.',
         { tool: 'optimize_profile' },
       );
     }
