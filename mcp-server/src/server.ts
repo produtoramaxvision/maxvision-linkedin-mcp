@@ -2,13 +2,13 @@
  * server — entrypoint for the MaxVision LinkedIn MCP server.
  *
  * Bootstraps the McpServer, registers tools, and connects the configured
- * transport (stdio for Claude Desktop / Claude Code; HTTP is Sprint 1.5).
+ * transport (stdio for Claude Desktop / Claude Code; HTTP for Sprint 1.5+).
  *
- * Graceful shutdown: SIGINT/SIGTERM logs the signal and exits 0. Future
- * sprints will close the browser pool, drain the DB pool, and quit Redis
- * here — wiring those teardown hooks lands when those resources are
- * actually held by this entrypoint (currently they're lazy-initialized
- * on first tool call).
+ * Graceful shutdown: SIGINT/SIGTERM closes the browser pool (which waits
+ * for in-flight contexts to drain via Patchright's own teardown) and quits
+ * the Redis client used by the rate-limit token bucket, then exits 0.
+ * The Postgres pool (`pgPool`) is left to close on process exit — it's
+ * idempotent and short-lived idle connections are fine.
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -16,6 +16,8 @@ import { env } from './env.js';
 import { logger } from './logger.js';
 import { registerAllTools } from './tools/_registry.js';
 import { startHttpServer } from './http.js';
+import { browserPool } from './browser/pool.js';
+import { shutdownRateLimit } from './rate-limit/token-bucket.js';
 
 const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
@@ -48,11 +50,23 @@ main().catch((err: unknown) => {
   process.exit(1);
 });
 
-// Graceful shutdown — current scope: just exit. Resource teardown lands when
-// the corresponding singletons are held here (browser pool, redis, db pool).
+// Graceful shutdown — close the browser pool and quit the Redis client used
+// by the rate-limit token bucket. Errors during teardown are logged but
+// non-fatal — we always reach process.exit(0) so OS / k8s liveness handlers
+// see a clean exit instead of a hung process.
+async function gracefulShutdown(sig: string): Promise<void> {
+  logger.info({ sig }, 'graceful shutdown starting');
+  try {
+    await browserPool.shutdown();
+    await shutdownRateLimit();
+  } catch (err) {
+    logger.warn({ err: (err as Error).message }, 'shutdown error (non-fatal)');
+  }
+  process.exit(0);
+}
+
 for (const sig of ['SIGINT', 'SIGTERM'] as const) {
   process.once(sig, () => {
-    logger.info({ sig }, 'shutdown signal received');
-    process.exit(0);
+    void gracefulShutdown(sig);
   });
 }

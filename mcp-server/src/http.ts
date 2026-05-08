@@ -37,6 +37,7 @@ import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/
 import { logger } from './logger.js';
 import { authenticateApiKey } from './auth/api-key.js';
 import { registerAllTools } from './tools/_registry.js';
+import { browserPool } from './browser/pool.js';
 
 const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
@@ -61,15 +62,18 @@ export async function startHttpServer(port: number): Promise<void> {
     );
   });
 
-  // Health (no auth).
-  app.get('/health', (c) =>
-    c.json({
+  // Health (no auth). Includes a cheap snapshot of the browser pool — DB
+  // queries are intentionally avoided so /health stays sub-millisecond.
+  app.get('/health', (c) => {
+    const browser = browserPool.getStats();
+    return c.json({
       status: 'ok',
       uptime_ms: Date.now() - startedAt,
       version: SERVER_VERSION,
       transport: 'http',
-    }),
-  );
+      browser,
+    });
+  });
 
   // Metrics (no auth — scraped from inside cluster).
   app.get('/metrics', (c) => {

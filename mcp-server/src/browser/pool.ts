@@ -84,6 +84,14 @@ class BrowserPool {
       this.browser = null;
     }
   }
+
+  /** Snapshot of pool state for /health diagnostics. Cheap, sync. */
+  getStats(): { size: number; inUse: number } {
+    return {
+      size: this.entries.length,
+      inUse: this.entries.filter((e) => e.inUse).length,
+    };
+  }
 }
 
 export const browserPool = new BrowserPool();

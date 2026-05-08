@@ -133,7 +133,7 @@ docker service logs -f traefik 2>&1 | grep -i linkedin-mcp
 # ... msg="Certificate obtained for domains [linkedin-mcp...]"
 ```
 
-Se o cert demorar mais que 5 min: ver Troubleshooting (seção 8).
+Se o cert demorar mais que 5 min: ver Troubleshooting (seção 9).
 
 ---
 
@@ -202,7 +202,83 @@ Reabra o Claude Code. O plugin conecta via HTTP em
 
 ---
 
-## 8. Troubleshooting
+## 8. Injetar cookie LinkedIn (Sprint 1.5+)
+
+A partir do Sprint 1.5 os scrapers usam Patchright para navegar LinkedIn real.
+Cada `accountId` no DB precisa ter cookie `li_at` válido encriptado.
+
+### 8.1 — Capturar `li_at` do navegador
+
+1. Login na sua conta LinkedIn (preferencialmente CONTA SANDBOX, não principal)
+2. DevTools → Application → Cookies → `https://www.linkedin.com`
+3. Localizar cookie `li_at`. Copiar o valor (string ~150 chars)
+
+### 8.2 — Encriptar e inserir no DB
+
+Opção A (script utilitário no laptop, fora da VPS):
+
+```bash
+cd mcp-server
+node --import tsx -e "
+import { encryptCookie } from './src/auth/cookies.js';
+process.env.MASTER_KEY = '<MASTER_KEY do stack>';
+const blob = encryptCookie('<COLE li_at AQUI>');
+console.log(blob.toString('hex'));
+"
+# Output: blob hex (IV‖tag‖ciphertext)
+```
+
+Opção B (SQL direto via Portainer Postgres console):
+
+```sql
+INSERT INTO accounts (id, display_name, cookie_encrypted, cookie_expires_at, status)
+VALUES (
+  'default',
+  'Conta Sandbox',
+  decode('<HEX BLOB OPCAO A>', 'hex'),
+  NOW() + INTERVAL '90 days',
+  'active'
+)
+ON CONFLICT (id) DO UPDATE SET
+  cookie_encrypted = EXCLUDED.cookie_encrypted,
+  cookie_expires_at = EXCLUDED.cookie_expires_at,
+  updated_at = NOW();
+```
+
+### 8.3 — Testar scraper real
+
+```bash
+curl -X POST https://linkedin-mcp.produtoramaxvision.com.br/mcp \
+  -H "Authorization: Bearer mxv_<your_key>" \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"search_jobs","arguments":{"keywords":"backend engineer","location":"São Paulo","maxResults":3,"sources":"linkedin"}}}'
+```
+
+Se retornar:
+- 200 com jobs reais → cookie OK
+- AppError code `COOKIE_EXPIRED` → cookie inválido, recapturar
+- AppError code `CAPTCHA_DETECTED` → conta sinalizada, parar 24h e refresh cookie
+
+### 8.4 — Rate-limit conservador Sprint 1.5
+
+**IMPORTANTE:** Sprint 1.5 ainda é beta. LinkedIn detecta automação.
+
+Recomendações para evitar ban:
+- Máx **1 search/h** durante primeiras 48h (validar saúde da conta)
+- Aumentar gradualmente até limite default (10 burst, 6/min sustained)
+- Usar `/linkedin-status` diariamente para checar `captcha_events`
+- NUNCA usar conta principal — sempre sandbox descartável
+- Em caso de captcha: stop 24h, refresh cookie
+
+Padrão por tier (Sprint 3+):
+- Free: 5 searches/dia, 3 profile views/dia
+- Pro: 50 searches/dia, 30 profile views/dia
+- Agency: pool de N contas, sem limite agregado individual
+
+---
+
+## 9. Troubleshooting
 
 ### `502 Bad Gateway`
 
@@ -276,7 +352,7 @@ docker network create --driver overlay --attachable net
 
 ---
 
-## 9. Update procedure (releases futuros)
+## 10. Update procedure (releases futuros)
 
 Quando o CI publicar uma versão nova (ex: `0.1.1-sprint2`):
 
