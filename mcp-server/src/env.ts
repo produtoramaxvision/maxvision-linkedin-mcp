@@ -13,6 +13,13 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   RATE_LIMIT_PER_MINUTE: z.coerce.number().int().positive().default(10),
+  // Comma-separated list of API keys accepted by the HTTP transport.
+  // Empty = open mode (logged as warning when MCP_TRANSPORT=http).
+  MCP_API_KEYS: z
+    .string()
+    .optional()
+    .default('')
+    .transform((s) => s.split(',').map((k) => k.trim()).filter(Boolean)),
 });
 
 const parsed = envSchema.safeParse(process.env);

@@ -1,95 +1,77 @@
-# linkedin-maxvision
+# MaxVision LinkedIn Suite
 
-Suíte de automação LinkedIn para Claude Code. Busca de vagas, lookup de perfis e tracker de candidaturas — tudo dentro do seu workspace, com motor anti-detect (Patchright) e respeito explícito aos Termos do LinkedIn.
+LinkedIn automation for Claude Code: search jobs, fetch profiles, track applications.
 
-> Tier **Free** — Sprint 1. Pro e Agency liberam multi-conta, fila de mensagens e auto-apply (Sprint 3).
+## Install (Sprint 1 — VPS managed)
 
----
+1. Get an API key
+   ```
+   Email produtoramaxvision@gmail.com to request an API key (Free tier — limited rate during beta).
+   You'll receive: mxv_<48hex>
+   ```
 
-## O que faz
+2. Set the key as env var (one-time)
+   - **Windows PowerShell:**
+     ```powershell
+     [Environment]::SetEnvironmentVariable("MAXVISION_API_KEY", "mxv_xxxx", "User")
+     ```
+     (close + reopen terminal after)
+   - **macOS/Linux:**
+     ```bash
+     echo 'export MAXVISION_API_KEY=mxv_xxxx' >> ~/.zshrc
+     source ~/.zshrc
+     ```
 
-- **Busca de vagas** no LinkedIn + agregadores (Indeed, Glassdoor, ZipRecruiter via JobSpy).
-- **Lookup de perfil público** por URL `/in/<slug>` — experiência, skills, sumário.
-- **Detalhes de vaga** por URL `/jobs/view/<id>` — descrição, requisitos, easy-apply.
-- **Tracker local** de candidaturas — status (saved/applied/interviewing/rejected/offered/withdrawn), notas, currículo usado.
-- **Rate-limit** automático por ferramenta + cache (60 min para vagas, 24 h para perfis).
-
-Tudo via MCP server local (Node 20 + Patchright + Postgres/Drizzle).
-
----
-
-## Instalação (Free tier)
-
-1. Compile o servidor MCP:
+3. Install the plugin
    ```bash
-   cd mcp-server
-   pnpm install
-   pnpm build
+   claude /plugin install produtoramaxvision/maxvision-linkedin-mcp
    ```
+   (or via marketplace UI when published)
 
-2. Configure a variável de cookie LinkedIn no `.env` (veja `mcp-server/.env.example`).
+4. Restart Claude Code → plugin connects to `https://linkedin-mcp.produtoramaxvision.com.br/mcp` automatically
 
-3. No Claude Code, instale o plugin:
+5. Verify
+   ```bash
+   /linkedin-status
    ```
-   /plugin install linkedin-maxvision
-   ```
+   Should report rate-limit + account health.
 
-4. Reinicie a sessão. O hook `SessionStart` exibe disclaimer ToS uma vez.
+## What it does
 
-5. Rode `/linkedin-status` para validar conexão e cookie.
+4 MCP tools (Sprint 1):
+- `search_jobs` — LinkedIn + Indeed/Glassdoor/ZipRecruiter via JobSpy. Cached 60min.
+- `get_profile` — Fetch LinkedIn profile by URL. Cached 24h.
+- `get_job_details` — Single job by URL. Cached 60min.
+- `track_application` — DB-backed application tracker.
 
----
+7 slash commands wrap the tools (see `/linkedin-find-jobs`, `/linkedin-job-details`, `/linkedin-profile`, `/linkedin-track`, `/linkedin-applications`, `/linkedin-status`, `/linkedin-cookie-refresh`).
 
-## Ferramentas MCP disponíveis
+4 specialized agents (auto-invoke based on user intent):
+- `linkedin-job-hunter` — orchestrates full search → research → track funnel
+- `linkedin-resume-tailor` — ATS-optimizes resume per job description
+- `linkedin-application-tracker` — pipeline manager
+- `linkedin-anti-detect-monitor` — account health watcher
 
-| Tool | Descrição | Cache |
-|---|---|---|
-| `search_jobs` | Busca em LinkedIn + JobSpy (Indeed/Glassdoor/ZipRecruiter) | 60 min |
-| `get_profile` | Perfil público por URL `/in/<slug>` | 24 h |
-| `get_job_details` | Vaga única por URL `/jobs/view/<id>` | 60 min |
-| `track_application` | Registra candidatura no tracker local | — |
+## Tier (Sprint 1 = beta, all Free)
 
-Todas as ferramentas validam input via Zod e expõem rate-limit por accountId.
+- **Free** (Sprint 1): rate-limited, all 4 tools, no DM (Sprint 2)
+- **Pro** (Sprint 3): outreach DM with approval gate, custom resume templates, no rate limit
+- **Agency** (Sprint 3): multi-account pool, bulk apply, white-label
 
----
+Pro/Agency upgrade: TBD post Sprint 3 (Stripe integration).
 
-## Slash commands (7)
+## ToS + Privacy
 
-| Comando | O que faz |
-|---|---|
-| `/linkedin-find-jobs` | Busca vagas (keywords + location opcional + source) |
-| `/linkedin-job-details` | Detalha uma vaga específica por URL |
-| `/linkedin-profile` | Lê perfil público estruturado |
-| `/linkedin-track` | Salva/atualiza status de candidatura |
-| `/linkedin-applications` | Lista candidaturas do tracker (Sprint 1.5: tool dedicado) |
-| `/linkedin-status` | Health check (rate-limit, captcha, cookie) |
-| `/linkedin-cookie-refresh` | Re-importa `li_at` quando expirado |
+- LinkedIn ToS-compliant: only uses authenticated cookie + public-page scraping
+- LGPD/GDPR-aware: cookies AES-256-GCM at rest, audit log SHA-256 hashes only
+- See [skills/linkedin-tos-compliance/SKILL.md](skills/linkedin-tos-compliance/SKILL.md) and [skills/lgpd-gdpr-handling/SKILL.md](skills/lgpd-gdpr-handling/SKILL.md)
 
----
+## License
 
-## ToS & Compliance
-
-- Acesso **somente** a dados públicos visíveis ao seu próprio cookie autenticado.
-- Sem scraping bruto, sem brute force, sem bypass de captcha.
-- Rate-limit conservador por padrão (≈ 60 req/h por tool).
-- O motor Patchright é anti-detect, **não** anti-ToS — uso continuado em massa pode levar à suspensão da sua conta. Você é responsável pelo seu uso.
-- Em caso de captcha persistente, a tool `search_jobs` aborta e sugere `/linkedin-cookie-refresh`.
-
-## LGPD
-
-- Todos os dados são armazenados **localmente** (Postgres na sua VPS ou local).
-- Cookie `li_at` é **encriptado** em repouso (AES-256-GCM, chave em env).
-- Nenhum dado é enviado a serviços externos da MaxVision na Free tier.
-- Para deletar tudo: `pnpm db:reset` no diretório `mcp-server/`.
-
----
+AGPL-3.0 (Free tier). Pro/Agency: proprietary EULA (Sprint 3).
 
 ## Links
 
-- Site: [linkedin.produtoramaxvision.com.br](https://linkedin.produtoramaxvision.com.br)
-- Upgrade Pro/Agency (Sprint 3): [linkedin.produtoramaxvision.com.br/pricing](https://linkedin.produtoramaxvision.com.br/pricing)
-- Suporte: produtoramaxvision@gmail.com
-
-## Licença
-
-AGPL-3.0. Forks e redistribuição comercial requerem código aberto da derivação.
+- Homepage: https://linkedin.produtoramaxvision.com.br
+- Issues: https://github.com/produtoramaxvision/maxvision-linkedin-mcp/issues
+- Email: produtoramaxvision@gmail.com

@@ -1,130 +1,67 @@
 # syntax=docker/dockerfile:1.7
 
 # ============================================================
-# MaxVision LinkedIn MCP — multi-stage Dockerfile
-# Compatível com:
-#   - Docker Engine standalone (docker compose up)
-#   - Docker Swarm (docker stack deploy)
-#   - Portainer Stack (Compose ou Swarm mode)
+# MaxVision LinkedIn MCP — multi-stage Dockerfile (Sprint 1)
+#
+# Build context: mcp-server/  (NOT repo root)
+# Build:    docker buildx build -f mcp-server/docker/Dockerfile mcp-server/
+# Multi-arch: linux/amd64 + linux/arm64 (CI workflow handles QEMU + buildx).
 #
 # Stages:
-#   1. base       — Node 20 + Python 3.12 + system deps
-#   2. patchright — Chromium + Patchright cache pre-baked
-#   3. deps       — pnpm install (Node) + pip install (Python)
-#   4. build      — TypeScript build
-#   5. runtime    — imagem final mínima
+#   1. builder — pnpm install (frozen-lockfile), tsc build, prune dev deps.
+#   2. runner  — minimal node:20-alpine runtime, non-root user, healthcheck.
+#
+# Sprint 1 scope: pure Node/TS surface (DB + Redis + HTTP transport).
+# Patchright/Chromium and Python deps are excluded by design — they land in
+# Sprint 2 (browser pool) and Sprint 3 (jobspy bridge).
 # ============================================================
 
-# ---------- Stage 1: base ----------
-FROM node:20-bookworm-slim AS base
-
-ENV DEBIAN_FRONTEND=noninteractive \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PNPM_HOME=/pnpm \
-    PATH=/pnpm:$PATH
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates \
-        curl \
-        git \
-        python3 \
-        python3-pip \
-        python3-venv \
-        tini \
-        # Patchright/Chromium runtime libs
-        libnss3 \
-        libnspr4 \
-        libatk1.0-0 \
-        libatk-bridge2.0-0 \
-        libcups2 \
-        libdrm2 \
-        libxkbcommon0 \
-        libxcomposite1 \
-        libxdamage1 \
-        libxfixes3 \
-        libxrandr2 \
-        libgbm1 \
-        libpango-1.0-0 \
-        libcairo2 \
-        libasound2 \
-        libatspi2.0-0 \
-        fonts-liberation \
-        fonts-noto-color-emoji \
-        fonts-noto-cjk \
-    && ln -sf /usr/bin/python3 /usr/local/bin/python \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN corepack enable && corepack prepare pnpm@9 --activate
-
-# ---------- Stage 2: patchright ----------
-FROM base AS patchright
-
-ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
-
-RUN mkdir -p ${PLAYWRIGHT_BROWSERS_PATH} \
-    && npm install -g patchright \
-    && patchright install chromium --with-deps \
-    && rm -rf /tmp/* /root/.npm
-
-# ---------- Stage 3: deps ----------
-FROM patchright AS deps
-
+# ----- builder -----
+FROM node:20-alpine AS builder
 WORKDIR /app
 
+# Install pnpm via corepack (pinned version)
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+
+# Copy lockfile + manifests first for cached install
 COPY package.json pnpm-lock.yaml ./
-COPY python/requirements.txt ./python/
+RUN pnpm install --frozen-lockfile --ignore-scripts
 
-RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm install --frozen-lockfile
+# Copy sources
+COPY tsconfig.json tsconfig.build.json drizzle.config.ts ./
+COPY src ./src
+COPY drizzle ./drizzle
 
-RUN python3 -m venv /opt/venv \
-    && /opt/venv/bin/pip install --no-cache-dir --upgrade pip \
-    && /opt/venv/bin/pip install --no-cache-dir -r python/requirements.txt
+# Build TypeScript -> dist/
+RUN pnpm run build
 
-ENV PATH=/opt/venv/bin:$PATH
+# Prune dev deps for runtime
+RUN pnpm prune --prod --ignore-workspace
 
-# ---------- Stage 4: build ----------
-FROM deps AS build
-
-COPY tsconfig.json ./
-COPY src/ ./src/
-COPY scripts/ ./scripts/
-
-RUN pnpm run build && pnpm prune --prod
-
-# ---------- Stage 5: runtime ----------
-FROM base AS runtime
+# ----- runner -----
+FROM node:20-alpine AS runner
+WORKDIR /app
 
 ENV NODE_ENV=production \
-    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
-    PATH=/opt/venv/bin:/pnpm:$PATH \
-    PORT=3000 \
-    METRICS_PORT=9090
+    MCP_TRANSPORT=http \
+    MCP_PORT=3000
 
-# Não rodar como root
-RUN groupadd --system --gid 1001 mcp \
-    && useradd --system --uid 1001 --gid mcp --home-dir /app --shell /bin/bash mcp \
-    && mkdir -p /app /var/data/profiles /var/data/screenshots /var/log/mcp \
-    && chown -R mcp:mcp /app /var/data /var/log/mcp
+# Non-root user (uid/gid 1001 to match common Docker conventions)
+RUN addgroup -g 1001 -S app && \
+    adduser -S -u 1001 -G app app && \
+    chown -R app:app /app
 
-WORKDIR /app
+USER app
 
-# Copiar artifacts dos stages anteriores
-COPY --from=patchright --chown=mcp:mcp /ms-playwright /ms-playwright
-COPY --from=deps      --chown=mcp:mcp /opt/venv /opt/venv
-COPY --from=build     --chown=mcp:mcp /app/node_modules ./node_modules
-COPY --from=build     --chown=mcp:mcp /app/dist ./dist
-COPY --from=build     --chown=mcp:mcp /app/scripts ./scripts
-COPY --from=build     --chown=mcp:mcp /app/python ./python
-COPY --chown=mcp:mcp package.json ./
+# Copy built artifacts + minimal runtime
+COPY --chown=app:app --from=builder /app/dist ./dist
+COPY --chown=app:app --from=builder /app/node_modules ./node_modules
+COPY --chown=app:app --from=builder /app/drizzle ./drizzle
+COPY --chown=app:app --from=builder /app/package.json ./
 
-USER mcp
+EXPOSE 3000
 
-EXPOSE 3000 9090
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD wget --quiet --tries=1 --spider http://localhost:3000/health || exit 1
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -fsS http://localhost:${PORT}/health || exit 1
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/index.js"]
+CMD ["node", "dist/server.js"]

@@ -1,6 +1,6 @@
 {
   "name": "linkedin-maxvision",
-  "version": "0.1.0-sprint1",
+  "version": "0.1.0-sprint1-http",
   "description": "LinkedIn automation suite for Claude Code: job search, profile lookup, application tracking. Anti-detect Patchright + ToS-aware. Free tier.",
   "author": {
     "name": "MaxVision Produtora",
@@ -13,12 +13,10 @@
   "keywords": ["linkedin", "automation", "job-search", "career", "mcp", "patchright"],
   "mcpServers": {
     "linkedin-maxvision": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/../../mcp-server/dist/server.js"],
-      "env": {
-        "MCP_TRANSPORT": "stdio",
-        "NODE_ENV": "production",
-        "LOG_LEVEL": "info"
+      "type": "http",
+      "url": "https://linkedin-mcp.produtoramaxvision.com.br/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MAXVISION_API_KEY}"
       }
     }
   },

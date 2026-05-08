@@ -21,15 +21,21 @@ const SERVER_NAME = 'maxvision-linkedin-mcp';
 const SERVER_VERSION = '0.1.0';
 
 async function main(): Promise<void> {
-  const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
-  registerAllTools(server);
+  if (env.MCP_TRANSPORT === 'http' && env.MCP_API_KEYS.length === 0) {
+    logger.warn(
+      {},
+      'HTTP mode without MCP_API_KEYS = open server. NOT FOR PRODUCTION.',
+    );
+  }
 
   if (env.MCP_TRANSPORT === 'stdio') {
+    const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+    registerAllTools(server);
     const transport = new StdioServerTransport();
     await server.connect(transport);
     logger.info({ transport: 'stdio' }, `${SERVER_NAME} v${SERVER_VERSION} ready`);
   } else {
-    await startHttpServer(server, env.MCP_PORT);
+    await startHttpServer(env.MCP_PORT);
     logger.info(
       { transport: 'http', port: env.MCP_PORT },
       `${SERVER_NAME} v${SERVER_VERSION} ready`,
