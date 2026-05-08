@@ -242,6 +242,70 @@ export async function startHttpServer(port: number): Promise<void> {
     return transport.handleRequest(c.req.raw);
   });
 
+  // ----- Sprint 5: webhook routes for n8n hybrid Variant B -----
+  // Authenticated via shared `WEBHOOK_SECRET` env var (separate from
+  // MCP_API_KEYS — webhooks have their own rotation cadence). When unset,
+  // webhook routes 503 — explicit opt-in.
+  const webhookSecret = process.env['WEBHOOK_SECRET'];
+
+  function checkWebhookSecret(c: { req: { header: (n: string) => string | undefined } }): boolean {
+    if (!webhookSecret) return false;
+    return c.req.header('x-webhook-secret') === webhookSecret;
+  }
+
+  app.post('/webhooks/job-found', async (c) => {
+    if (!webhookSecret) return c.json({ error: 'webhooks_disabled' }, 503);
+    if (!checkWebhookSecret(c)) return c.json({ error: 'unauthorized' }, 401);
+    const body = await c.req.json().catch(() => null);
+    logger.info({ event: 'job-found', payload: body }, 'webhook received');
+    return c.json({ received: true });
+  });
+
+  app.post('/webhooks/recruiter-msg', async (c) => {
+    if (!webhookSecret) return c.json({ error: 'webhooks_disabled' }, 503);
+    if (!checkWebhookSecret(c)) return c.json({ error: 'unauthorized' }, 401);
+    const body = await c.req.json().catch(() => null);
+    logger.info({ event: 'recruiter-msg', payload: body }, 'webhook received');
+    return c.json({ received: true });
+  });
+
+  // Server-Sent Events stream — n8n consumers tail this for tool events.
+  // Sprint 5 minimal scaffold: heartbeat every 30s + fanout from in-memory
+  // bus (TBD). Real fanout lands in Sprint 5.2 once tools emit events.
+  app.get('/events', async (c) => {
+    if (!webhookSecret) return c.json({ error: 'webhooks_disabled' }, 503);
+    if (!checkWebhookSecret(c)) return c.json({ error: 'unauthorized' }, 401);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        const enc = new TextEncoder();
+        controller.enqueue(enc.encode('event: connected\ndata: {}\n\n'));
+        const heartbeat = setInterval(() => {
+          try {
+            controller.enqueue(enc.encode(`event: heartbeat\ndata: ${Date.now()}\n\n`));
+          } catch {
+            clearInterval(heartbeat);
+          }
+        }, 30000);
+        // Closing — best-effort interval cleanup.
+        c.req.raw.signal.addEventListener('abort', () => {
+          clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch {
+            // already closed
+          }
+        });
+      },
+    });
+    return new Response(stream, {
+      headers: {
+        'content-type': 'text/event-stream',
+        'cache-control': 'no-cache',
+        connection: 'keep-alive',
+      },
+    });
+  });
+
   app.notFound((c) => c.json({ error: 'not_found' }, 404));
 
   app.onError((err, c) => {

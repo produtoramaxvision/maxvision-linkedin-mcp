@@ -1,0 +1,108 @@
+{
+  "name": "LinkedIn Batch Apply — MaxVision",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "linkedin-batch-apply",
+        "responseMode": "responseNode",
+        "authentication": "headerAuth"
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook (POST batch URLs)",
+      "type": "n8n-nodes-base.webhook",
+      "position": [240, 300],
+      "typeVersion": 2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "webhook-secret",
+          "name": "MCP Webhook Secret"
+        }
+      }
+    },
+    {
+      "parameters": { "jsCode": "// Body shape: {jobUrls: ['https://...', ...], confirm: false}\nconst { jobUrls = [], confirm = false } = $json.body || {};\nreturn jobUrls.map(url => ({ json: { jobUrl: url, confirm } }));" },
+      "id": "split-input",
+      "name": "Split URLs",
+      "type": "n8n-nodes-base.code",
+      "position": [460, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MCP_URL }}/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"apply_easy\",\n    \"arguments\": {\n      \"jobUrl\": \"{{ $json.jobUrl }}\",\n      \"confirm\": {{ $json.confirm }},\n      \"accountId\": \"{{ $env.MCP_ACCOUNT_ID || 'sandbox-1' }}\"\n    }\n  }\n}"
+      },
+      "id": "apply-call",
+      "name": "MCP apply_easy",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [680, 300],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mcp-bearer",
+          "name": "MCP Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": { "__rl": true, "value": "={{ $env.SHEETS_DOC_ID }}", "mode": "id" },
+        "sheetName": "Applications",
+        "columns": {
+          "value": {
+            "url": "={{ $('Split URLs').item.json.jobUrl }}",
+            "applied_at": "={{ new Date().toISOString() }}",
+            "result": "={{ JSON.stringify($json) }}"
+          }
+        }
+      },
+      "id": "sheets-log",
+      "name": "Google Sheets Log",
+      "type": "n8n-nodes-base.googleSheets",
+      "position": [900, 300],
+      "typeVersion": 4.5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets",
+          "name": "Google Sheets OAuth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={ \"processed\": $items().length, \"timestamp\": new Date().toISOString() }"
+      },
+      "id": "respond",
+      "name": "Respond OK",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [1120, 300],
+      "typeVersion": 1.1
+    }
+  ],
+  "connections": {
+    "Webhook (POST batch URLs)": { "main": [[{ "node": "Split URLs", "type": "main", "index": 0 }]] },
+    "Split URLs": { "main": [[{ "node": "MCP apply_easy", "type": "main", "index": 0 }]] },
+    "MCP apply_easy": { "main": [[{ "node": "Google Sheets Log", "type": "main", "index": 0 }]] },
+    "Google Sheets Log": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": {
+    "description": "MaxVision LinkedIn — Batch Easy Apply. POST /webhook/linkedin-batch-apply with {jobUrls:[], confirm:bool}. Logs to Google Sheets."
+  }
+}

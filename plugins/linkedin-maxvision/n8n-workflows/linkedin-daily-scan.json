@@ -1,0 +1,86 @@
+{
+  "name": "LinkedIn Daily Scan — MaxVision",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "hours", "hoursInterval": 24, "triggerAtHour": 9 }
+          ]
+        }
+      },
+      "id": "trigger-cron-9am",
+      "name": "Daily 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MCP_URL }}/mcp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"search_jobs\",\n    \"arguments\": {\n      \"keywords\": \"{{ $env.SEARCH_KEYWORDS || 'Engenheiro de IA' }}\",\n      \"location\": \"{{ $env.SEARCH_LOCATION || 'São Paulo, BR' }}\",\n      \"sources\": \"both\",\n      \"maxResults\": 10,\n      \"accountId\": \"{{ $env.MCP_ACCOUNT_ID || 'sandbox-1' }}\"\n    }\n  }\n}"
+      },
+      "id": "mcp-search",
+      "name": "MCP search_jobs",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mcp-bearer",
+          "name": "MCP Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.result?.content?.[0]?.text;\nif (!text) return [{ json: { jobs: [] } }];\nconst data = JSON.parse(text);\nreturn data.jobs.map(job => ({ json: job }));"
+      },
+      "id": "split-jobs",
+      "name": "Parse + Split",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $env.TELEGRAM_CHAT_ID }}",
+        "text": "=🆕 *{{ $json.title }}* @ *{{ $json.company }}*\n📍 {{ $json.location }}\n🔗 {{ $json.url }}",
+        "additionalFields": { "parse_mode": "Markdown" }
+      },
+      "id": "telegram-notify",
+      "name": "Telegram Notify",
+      "type": "n8n-nodes-base.telegram",
+      "position": [900, 300],
+      "typeVersion": 1.1,
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-bot",
+          "name": "Telegram Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Daily 09:00": { "main": [[{ "node": "MCP search_jobs", "type": "main", "index": 0 }]] },
+    "MCP search_jobs": { "main": [[{ "node": "Parse + Split", "type": "main", "index": 0 }]] },
+    "Parse + Split": { "main": [[{ "node": "Telegram Notify", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": {
+    "description": "MaxVision LinkedIn — Daily job scan at 09:00 with Telegram notify. Set MCP_URL, MCP_ACCOUNT_ID, SEARCH_KEYWORDS, SEARCH_LOCATION, TELEGRAM_CHAT_ID env vars."
+  }
+}

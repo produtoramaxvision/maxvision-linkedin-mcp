@@ -1,0 +1,97 @@
+{
+  "name": "LinkedIn Profile Weekly Audit — MaxVision",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "weeks", "weeksInterval": 1, "triggerAtDay": [1], "triggerAtHour": 8 }
+          ]
+        }
+      },
+      "id": "trigger-weekly",
+      "name": "Monday 08:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "position": [240, 300],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.MCP_URL }}/mcp",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Accept", "value": "application/json, text/event-stream" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"jsonrpc\": \"2.0\",\n  \"id\": 1,\n  \"method\": \"tools/call\",\n  \"params\": {\n    \"name\": \"optimize_profile\",\n    \"arguments\": {\n      \"targetRole\": \"{{ $env.TARGET_ROLE || 'Senior AI Engineer' }}\",\n      \"profileText\": \"{{ $env.PROFILE_TEXT }}\",\n      \"accountId\": \"{{ $env.MCP_ACCOUNT_ID || 'sandbox-1' }}\"\n    }\n  }\n}"
+      },
+      "id": "mcp-optimize",
+      "name": "MCP optimize_profile",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [460, 300],
+      "typeVersion": 4.2,
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "mcp-bearer",
+          "name": "MCP Bearer Token"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const text = $input.first().json.result?.content?.[0]?.text;\nif (!text) return [{ json: { error: 'no_content' } }];\nconst data = JSON.parse(text);\nreturn [{ json: data }];"
+      },
+      "id": "parse",
+      "name": "Parse",
+      "type": "n8n-nodes-base.code",
+      "position": [680, 300],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "resource": "page",
+        "pageId": "={{ $env.NOTION_PAGE_ID }}",
+        "blockUi": {
+          "blockValues": [
+            {
+              "type": "heading_1",
+              "headingText": "=📊 Profile Audit — {{ $now.format('YYYY-MM-DD') }}"
+            },
+            { "type": "heading_2", "headingText": "Summary Analysis" },
+            { "type": "paragraph", "text": "={{ $json.summaryAnalysis }}" },
+            { "type": "heading_2", "headingText": "Recommended Headline" },
+            { "type": "paragraph", "text": "={{ $json.headlineSuggestion }}" }
+          ]
+        }
+      },
+      "id": "notion-write",
+      "name": "Notion Append",
+      "type": "n8n-nodes-base.notion",
+      "position": [900, 300],
+      "typeVersion": 2.2,
+      "credentials": {
+        "notionApi": {
+          "id": "notion-integration",
+          "name": "Notion Integration"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Monday 08:00": { "main": [[{ "node": "MCP optimize_profile", "type": "main", "index": 0 }]] },
+    "MCP optimize_profile": { "main": [[{ "node": "Parse", "type": "main", "index": 0 }]] },
+    "Parse": { "main": [[{ "node": "Notion Append", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "staticData": null,
+  "meta": {
+    "description": "MaxVision LinkedIn — Weekly Monday 08:00 profile audit. Calls optimize_profile, writes results to Notion. Set TARGET_ROLE, PROFILE_TEXT, NOTION_PAGE_ID, MCP_ACCOUNT_ID env vars."
+  }
+}

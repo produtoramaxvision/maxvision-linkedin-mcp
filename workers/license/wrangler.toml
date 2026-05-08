@@ -1,0 +1,23 @@
+name = "maxv-linkedin-license"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Routes — bind to license.linkedin.maxvision.com.br once DNS is set.
+routes = [
+  { pattern = "license.linkedin.maxvision.com.br/v1/*", zone_name = "linkedin.maxvision.com.br" },
+]
+
+# KV namespace for license key storage. Create with:
+#   wrangler kv:namespace create maxv-linkedin-licenses
+[[kv_namespaces]]
+binding = "LICENSES"
+id = "REPLACE_WITH_KV_ID_FROM_WRANGLER_OUTPUT"
+
+[vars]
+# Public, baked-in. Stripe webhook secret + signing key live in dashboard.
+ENVIRONMENT = "production"
+
+# Set via `wrangler secret put STRIPE_WEBHOOK_SECRET`.
+# Set via `wrangler secret put STRIPE_SECRET_KEY`.
+# Set via `wrangler secret put ADMIN_TOKEN` for /v1/revoke.
