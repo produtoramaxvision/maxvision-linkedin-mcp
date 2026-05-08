@@ -1,26 +1,30 @@
 /**
- * LinkedIn profile scraper — Sprint 1.5 real Patchright nav.
+ * LinkedIn profile scraper — Sprint 1.5.7 voyager API path.
  *
- * Acquires a per-account BrowserContext from `browserPool`, navigates to the
- * profile URL, guards against captcha (HTTP 999) and authwall redirects, and
- * extracts profile sections via `page.evaluate`.
+ * Server-side Patchright nav to /in/<slug> hits LinkedIn's
+ * `auth_wall_desktop_profile` even with full multi-cookie auth (validated via
+ * docker exec inspect-profile.mjs). The voyager GraphQL endpoints LinkedIn's
+ * own web app uses accept the same cookie set we ship, so we delegate to the
+ * `tomquirk/linkedin-api` Python wrapper which handles the GraphQL surface.
  *
- * Selector caveat: LinkedIn profile DOM uses ad-hoc class names ("text-heading-xlarge",
- * etc.) that mutate frequently. We try multiple candidates per field. Sprint
- * 1.5.1 will validate selectors against authenticated DOM with sandbox cookie.
+ * Auth model: cookies-only. We decrypt the account's cookie blob, ship the
+ * cookie array to a Python subprocess via stdin, parse profile JSON from
+ * stdout, and map the voyager response shape to our canonical ProfileData.
  */
-/// <reference lib="dom" />
-import { browserPool } from '../browser/pool.js';
-import { db } from '../db/client.js';
-import { captchaEvents } from '../db/schema.js';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { decryptCookie } from '../auth/cookies.js';
+import { getAccountById } from '../db/repos/accounts.repo.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
+
+const PYTHON_RUNNER_TIMEOUT_MS = 45000;
 
 export interface ProfileExperience {
   title: string;
   company: string;
-  startDate: string;       // ISO YYYY-MM
-  endDate: string | null;  // null = current
+  startDate: string;
+  endDate: string | null;
   location?: string;
   description?: string;
 }
@@ -35,7 +39,7 @@ export interface ProfileEducation {
 
 export interface ProfileData {
   url: string;
-  publicId: string;        // slug from /in/<slug>
+  publicId: string;
   fullName: string;
   headline: string;
   location: string;
@@ -45,7 +49,179 @@ export interface ProfileData {
   experience: ProfileExperience[];
   education: ProfileEducation[];
   skills: string[];
-  fetchedAt: string;       // ISO 8601
+  fetchedAt: string;
+}
+
+interface RawCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  sameSite?: string;
+  expires?: number;
+}
+
+function resolveCookiesArray(plaintext: string): RawCookie[] {
+  const t = plaintext.trim();
+  if (t.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(t) as unknown;
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed as RawCookie[];
+    } catch {
+      // fall through
+    }
+  }
+  // Legacy single-li_at fallback.
+  return [{ name: 'li_at', value: plaintext, domain: '.linkedin.com', path: '/' }];
+}
+
+function callLinkedinApiRunner(
+  cookies: RawCookie[],
+  args: string[],
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const candidates = [
+      new URL('../../python/linkedin_api_runner.py', import.meta.url).pathname,
+      '/app/python/linkedin_api_runner.py',
+    ];
+    const runnerPath = candidates.find((p) => {
+      try {
+        return require('node:fs').statSync(p).isFile();
+      } catch {
+        return false;
+      }
+    }) ?? candidates[0]!;
+
+    const child = spawn('python3', [runnerPath, ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new AppError('SCRAPER_FAIL', `linkedin-api runner timeout ${PYTHON_RUNNER_TIMEOUT_MS}ms`));
+    }, PYTHON_RUNNER_TIMEOUT_MS);
+
+    child.stdout.on('data', (chunk: Buffer) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      reject(
+        new AppError('SCRAPER_FAIL', `linkedin-api spawn failed: ${err.message}`, {}, err),
+      );
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        const errPath = code === 2 ? 'cookies' : code === 3 ? 'auth' : 'unknown';
+        reject(
+          new AppError(
+            code === 3 ? 'COOKIE_EXPIRED' : 'SCRAPER_FAIL',
+            `linkedin-api exit ${code} (${errPath}): ${stderr.slice(0, 400)}`,
+            { code, stderr: stderr.slice(0, 400) },
+          ),
+        );
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (err) {
+        reject(
+          new AppError(
+            'SCRAPER_FAIL',
+            `linkedin-api stdout parse fail: ${(err as Error).message}`,
+            { stdoutHead: stdout.slice(0, 200) },
+            err,
+          ),
+        );
+      }
+    });
+
+    child.stdin.write(JSON.stringify(cookies));
+    child.stdin.end();
+  });
+}
+
+/**
+ * Map a `tomquirk/linkedin-api` get_profile() response to our ProfileData
+ * shape. The library returns a dict with `firstName`, `lastName`, `headline`,
+ * `geoLocationName`, `summary`, `experience`, `education`, `skills` keys.
+ */
+function mapVoyagerProfile(slug: string, raw: Record<string, unknown>): ProfileData {
+  const firstName = String(raw['firstName'] ?? '');
+  const lastName = String(raw['lastName'] ?? '');
+  const fullName = (firstName + ' ' + lastName).trim();
+  const headline = String(raw['headline'] ?? '');
+  const location =
+    String(raw['geoLocationName'] ?? '') ||
+    String(raw['locationName'] ?? '') ||
+    '';
+  const summary = String(raw['summary'] ?? '');
+
+  const experienceRaw = Array.isArray(raw['experience']) ? raw['experience'] : [];
+  const experience: ProfileExperience[] = experienceRaw.slice(0, 10).map((e) => {
+    const exp = e as Record<string, unknown>;
+    const startDateObj = exp['timePeriod'] as Record<string, unknown> | undefined;
+    const startYM = startDateObj?.['startDate'] as Record<string, number> | undefined;
+    const endYM = startDateObj?.['endDate'] as Record<string, number> | undefined;
+    const fmt = (ym: Record<string, number> | undefined): string => {
+      if (!ym) return '';
+      const y = ym['year'] ?? 0;
+      const m = ym['month'] ?? 0;
+      return y ? (m ? `${y}-${String(m).padStart(2, '0')}` : String(y)) : '';
+    };
+    return {
+      title: String(exp['title'] ?? ''),
+      company: String(exp['companyName'] ?? exp['company'] ?? ''),
+      startDate: fmt(startYM),
+      endDate: endYM ? fmt(endYM) : null,
+      location: String(exp['locationName'] ?? ''),
+      description: String(exp['description'] ?? ''),
+    };
+  });
+
+  const educationRaw = Array.isArray(raw['education']) ? raw['education'] : [];
+  const education: ProfileEducation[] = educationRaw.slice(0, 5).map((e) => {
+    const ed = e as Record<string, unknown>;
+    const tp = ed['timePeriod'] as Record<string, unknown> | undefined;
+    const startY = (tp?.['startDate'] as Record<string, number> | undefined)?.['year'] ?? 0;
+    const endY = (tp?.['endDate'] as Record<string, number> | undefined)?.['year'] ?? null;
+    return {
+      school: String(ed['schoolName'] ?? ed['school'] ?? ''),
+      degree: ed['degreeName'] ? String(ed['degreeName']) : undefined,
+      field: ed['fieldOfStudy'] ? String(ed['fieldOfStudy']) : undefined,
+      startYear: typeof startY === 'number' ? startY : 0,
+      endYear: typeof endY === 'number' ? endY : null,
+    };
+  });
+
+  const skillsRaw = Array.isArray(raw['skills']) ? raw['skills'] : [];
+  const skills: string[] = skillsRaw
+    .slice(0, 30)
+    .map((s) => String((s as Record<string, unknown>)['name'] ?? s ?? ''))
+    .filter(Boolean);
+
+  return {
+    url: `https://www.linkedin.com/in/${slug}`,
+    publicId: slug,
+    fullName,
+    headline,
+    location,
+    currentCompany: experience[0]?.company || null,
+    currentRole: experience[0]?.title || null,
+    summary,
+    experience,
+    education,
+    skills,
+    fetchedAt: new Date().toISOString(),
+  };
 }
 
 export async function scrapeProfile(args: {
@@ -54,116 +230,28 @@ export async function scrapeProfile(args: {
 }): Promise<ProfileData> {
   const { accountId, profileUrl } = args;
   const slug = extractPublicId(profileUrl);
-  const acquired = await browserPool.acquire(accountId);
-  const { context, release } = acquired;
 
-  try {
-    const page = await context.newPage();
-    logger.info({ accountId, profileUrl, slug }, 'profile nav start');
+  const account = await getAccountById(accountId);
+  if (!account) throw new AppError('UNKNOWN', `Account not found: ${accountId}`);
 
-    const response = await page.goto(profileUrl, {
-      waitUntil: 'domcontentloaded',
-      timeout: 30000,
-    });
+  const plaintext = decryptCookie(account.cookieEncrypted);
+  const cookies = resolveCookiesArray(plaintext);
 
-    if (response?.status() === 999) {
-      await db
-        .insert(captchaEvents)
-        .values({ accountId, context: 'profile_view', resolved: false })
-        .catch(() => {});
-      throw new AppError('CAPTCHA_DETECTED', `LinkedIn 999 on profile`, { url: profileUrl });
-    }
-    if (page.url().includes('/authwall') || page.url().includes('/login')) {
-      throw new AppError('COOKIE_EXPIRED', `LinkedIn auth wall on profile`, {
-        redirectedTo: page.url(),
-      });
-    }
+  logger.info(
+    { accountId, slug, cookieCount: cookies.length },
+    'voyager profile fetch start',
+  );
 
-    // TODO Sprint 1.5.1: validate selectors with sandbox cookie.
-    // Profile sections in 2025-2026 use shadow-DOM-ish containers; main selectors:
-    //   h1.text-heading-xlarge — full name
-    //   div.text-body-medium — headline (sub h1)
-    //   #experience section, #education section, #skills section
-    await page.waitForSelector('h1, main', { timeout: 15000 });
+  const raw = (await callLinkedinApiRunner(cookies, [
+    '--action',
+    'get_profile',
+    '--public-id',
+    slug,
+  ])) as Record<string, unknown>;
 
-    const data: ProfileData = await page.evaluate((s: string) => {
-      const text = (sel: string): string =>
-        document.querySelector(sel)?.textContent?.trim() || '';
-      const all = (sel: string): Element[] => Array.from(document.querySelectorAll(sel));
-
-      const fullName = text('h1.text-heading-xlarge') || text('h1');
-      const headline = text('div.text-body-medium.break-words');
-      const location = text('span.text-body-small.inline.t-black--light.break-words');
-
-      const experience: Array<{
-        title: string;
-        company: string;
-        startDate: string;
-        endDate: string | null;
-        location: string;
-        description: string;
-      }> = all('#experience ~ div ul > li, [data-section="experience"] li')
-        .slice(0, 10)
-        .map((li) => ({
-          title: (li.querySelector('span[aria-hidden="true"]')?.textContent || '').trim(),
-          company: (li.querySelectorAll('span.t-14.t-normal')[0]?.textContent || '').trim(),
-          startDate: '',
-          endDate: null,
-          location: '',
-          description: '',
-        }));
-
-      const education: Array<{
-        school: string;
-        degree: string | undefined;
-        field: string | undefined;
-        startYear: number;
-        endYear: number | null;
-      }> = all('#education ~ div ul > li, [data-section="education"] li')
-        .slice(0, 5)
-        .map((li) => ({
-          school: (li.querySelector('span[aria-hidden="true"]')?.textContent || '').trim(),
-          degree: undefined,
-          field: undefined,
-          startYear: 0,
-          endYear: null,
-        }));
-
-      const skills: string[] = all('#skills ~ div ul > li span[aria-hidden="true"]')
-        .slice(0, 20)
-        .map((el) => el.textContent?.trim() || '')
-        .filter(Boolean);
-
-      return {
-        url: window.location.href,
-        publicId: s,
-        fullName,
-        headline,
-        location,
-        currentCompany: experience[0]?.company || null,
-        currentRole: experience[0]?.title || null,
-        summary: '',
-        experience,
-        education,
-        skills,
-        fetchedAt: new Date().toISOString(),
-      };
-    }, slug);
-
-    await page.close();
-    logger.info({ accountId, slug, name: data.fullName }, 'profile scrape ok');
-    return data;
-  } catch (err) {
-    if (err instanceof AppError) throw err;
-    throw new AppError(
-      'SCRAPER_FAIL',
-      `profile scrape failed: ${(err as Error).message}`,
-      { profileUrl },
-      err,
-    );
-  } finally {
-    release();
-  }
+  const mapped = mapVoyagerProfile(slug, raw);
+  logger.info({ accountId, slug, name: mapped.fullName }, 'voyager profile fetch ok');
+  return mapped;
 }
 
 /** Extract `/in/<slug>` from a LinkedIn profile URL. Throws if not matched. */
@@ -172,3 +260,6 @@ export function extractPublicId(url: string): string {
   if (!m) throw new AppError('VALIDATION_FAIL', `Not a LinkedIn profile URL: ${url}`);
   return m[1]!.toLowerCase();
 }
+
+// `path` is unused — kept import to avoid module-side-effect surprises.
+void path;
