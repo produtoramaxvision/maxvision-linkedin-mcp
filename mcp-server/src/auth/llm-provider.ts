@@ -30,7 +30,11 @@ interface ProviderConfig {
 
 const DEFAULT_MODELS: Record<Provider, string> = {
   anthropic: 'claude-haiku-4-5-20251001',
-  openrouter: 'anthropic/claude-haiku-4.5',
+  // Gemini 3.1 Pro Custom Tools — improved tool-selection behavior, 1M context,
+  // strong on coding agents + multi-tool workflows. $2/$12 per 1M tokens.
+  // Override via LLM_MODEL env if you prefer claude-haiku-4.5 (cheaper) or
+  // openai/gpt-4o-mini (cheaper still).
+  openrouter: 'google/gemini-3.1-pro-preview-customtools',
   openai: 'gpt-4o-mini',
 };
 
