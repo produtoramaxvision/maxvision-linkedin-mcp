@@ -1,0 +1,45 @@
+name: Compliance / ToS / Privacy
+description: Reportar issue de LinkedIn ToS, GDPR/LGPD ou anti-detect
+title: "[compliance]: "
+labels: ["compliance"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        > **Issues de compliance são tratadas com prioridade.** Se for sensível
+        > (vazamento de dados, account ban), prefira email privado:
+        > produtoramaxvision@gmail.com.
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Categoria
+      options:
+        - LinkedIn ToS — comportamento que pode violar termos
+        - LinkedIn account ban / restriction
+        - Anti-detect bypass / captcha rate
+        - GDPR/LGPD / privacy
+        - Cookie security / leak
+        - Outro
+    validations:
+      required: true
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Descrição
+      description: Detalhes do problema. Não inclua informações de terceiros sem consentimento.
+    validations:
+      required: true
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impacto observado
+      description: Quantas contas? Por quanto tempo? Reversível?
+
+  - type: textarea
+    id: mitigation
+    attributes:
+      label: Mitigação sugerida
+      description: Se você tem ideia de como resolver, compartilhe.

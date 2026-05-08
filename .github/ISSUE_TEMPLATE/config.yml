@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Suporte Pro/Agency
+    url: https://linkedin.produtoramaxvision.com.br/support
+    about: Clientes Pro e Agency têm suporte prioritário via email/Slack.
+  - name: Discussões da comunidade
+    url: https://github.com/produtoramaxvision/maxvision-linkedin-mcp/discussions
+    about: Para perguntas gerais, ideias e troca de experiências.
+  - name: Reportar problema de compliance/legal
+    url: mailto:produtoramaxvision@gmail.com
+    about: Reports privados sobre ToS LinkedIn ou compliance vão direto pra mim.

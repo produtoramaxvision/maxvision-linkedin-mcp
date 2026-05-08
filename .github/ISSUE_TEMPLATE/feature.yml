@@ -1,0 +1,41 @@
+name: Feature Request
+description: Sugerir nova funcionalidade ou melhoria
+title: "[feat]: "
+labels: ["feature"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema que resolve
+      description: O que está difícil ou impossível hoje?
+      placeholder: "Hoje preciso revisar manualmente cada resume customizado antes de submeter. Gostaria de auto-aprovar quando score > 90%."
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Solução proposta
+      description: Como você imagina que funcionaria?
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Em qual tier essa feature faria sentido?
+      options: [free, pro, agency, indiferente]
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas
+      description: O que mais foi considerado e por que essa é melhor?
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Contexto adicional
+      description: Screenshots, links, exemplos de outros produtos.

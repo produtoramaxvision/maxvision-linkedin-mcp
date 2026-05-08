@@ -1,0 +1,62 @@
+name: Bug Report
+description: Reportar comportamento que não funciona como esperado
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Obrigado por reportar. Quanto mais detalhe, mais rápido o fix.
+        Não cole conteúdo de cookies ou dados pessoais — eles serão redigidos.
+
+  - type: input
+    id: version
+    attributes:
+      label: Versão do MCP
+      description: "Output de `docker exec maxvision-linkedin-mcp /app/bin/mcp --version`"
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: tier
+    attributes:
+      label: Tier
+      options: [free, pro, agency]
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy
+    attributes:
+      label: Modo de deploy
+      options: [Docker Compose local, Docker Swarm, Portainer Stack, Cloud-hosted]
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Passos para reproduzir
+      description: Lista numerada — quanto mais minimal, melhor.
+      placeholder: |
+        1. Rodar `/linkedin-scan "Senior Backend Python"`
+        2. Subagent retorna ...
+        3. Esperado: lista de 30 vagas. Atual: erro X.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs relevantes
+      description: "Últimas 30 linhas de `docker logs maxvision-linkedin-mcp`. Redija qualquer cookie ou dado pessoal."
+      render: shell
+
+  - type: checkboxes
+    id: compliance
+    attributes:
+      label: Compliance
+      options:
+        - label: Confirmo que NÃO incluí cookies LinkedIn, dados pessoais ou credenciais nos logs.
+          required: true
