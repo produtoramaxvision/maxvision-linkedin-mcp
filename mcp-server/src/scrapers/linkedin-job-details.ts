@@ -72,8 +72,14 @@ export async function scrapeJobDetails(args: {
       });
     }
 
-    // Wait for the job details panel — try multiple candidates.
-    await page.waitForSelector('h1.t-24, h1.top-card-layout__title, main', { timeout: 15000 });
+    // Wait for the job details panel. Sprint 1.5.6: server-side LinkedIn
+    // returns the GUEST layout (pageKey=d_jobs_guest_details), not the
+    // authenticated app shell — even with cookies. Validated via inspect-job
+    // utility against /jobs/view/4407946949 from the live container.
+    await page.waitForSelector(
+      'h1.top-card-layout__title, h1.t-24, h1, main',
+      { timeout: 30000, state: 'attached' },
+    );
 
     // Try expanding description if "see more" button is present. Optional —
     // failure here must not abort the scrape.
@@ -87,37 +93,65 @@ export async function scrapeJobDetails(args: {
           document.querySelector(sel)?.textContent?.trim() || '';
 
         const title =
-          text('h1.t-24') ||
           text('h1.top-card-layout__title') ||
+          text('h1.t-24') ||
           text('h1');
 
-        // Company link is usually the first .app-aware-link inside the top
-        // card; fall back to any company-name node.
+        // Sprint 1.5.6: server-side guest layout uses .topcard__flavor for
+        // company name (first .topcard__flavor item) and .topcard__flavor--bullet
+        // for location. The auth layout would have a.app-aware-link inside the
+        // top card; we keep both as fallbacks.
         const companyEl = document.querySelector(
-          'a.app-aware-link[href*="/company/"], .topcard__org-name-link, .top-card-layout__entity-info a',
+          'a.topcard__org-name-link, a.app-aware-link[href*="/company/"], .top-card-layout__entity-info a',
         ) as HTMLAnchorElement | null;
-        const company = companyEl?.textContent?.trim() || text('.topcard__flavor');
-        const companyUrl = companyEl?.href || undefined;
-
-        // tvm__text spans collect: location, posted age, applicants count,
-        // workplace tag. Order varies; pick by content.
-        const tvmTexts = Array.from(document.querySelectorAll('span.tvm__text'))
+        const topcardFlavors = Array.from(document.querySelectorAll('.topcard__flavor'))
           .map((el) => el.textContent?.trim() || '')
           .filter(Boolean);
+        const company =
+          companyEl?.textContent?.trim() ||
+          topcardFlavors[0] ||
+          '';
+        const companyUrl = companyEl?.href || undefined;
 
-        let location = '';
-        let postedRaw = '';
-        let applicantsRaw = '';
-        let workplaceRaw = '';
-        for (const t of tvmTexts) {
-          if (/applicants?/i.test(t) && !applicantsRaw) applicantsRaw = t;
-          else if (/(ago|hour|day|week|month|atrás|hora|dia|semana|mês)/i.test(t) && !postedRaw)
-            postedRaw = t;
-          else if (/(remote|hybrid|on-?site|remoto|híbrido|presencial)/i.test(t) && !workplaceRaw)
-            workplaceRaw = t;
-          else if (!location) location = t;
-        }
-        if (!location) location = text('.topcard__flavor--bullet');
+        // Location: guest layout = .topcard__flavor--bullet (or 2nd flavor).
+        // Auth layout = span.tvm__text scanned by content.
+        let location =
+          text('.topcard__flavor--bullet') ||
+          topcardFlavors[1] ||
+          '';
+
+        // Posted age: guest = .posted-time-ago__text. Auth = span.tvm__text.
+        const postedRaw =
+          text('.posted-time-ago__text') ||
+          (() => {
+            const tvm = Array.from(document.querySelectorAll('span.tvm__text'))
+              .map((el) => el.textContent?.trim() || '');
+            return (
+              tvm.find((t) =>
+                /(ago|hour|day|week|month|atrás|hora|dia|semana|mês)/i.test(t),
+              ) || ''
+            );
+          })();
+
+        // Applicants count: guest = .num-applicants__caption. Auth = tvm__text.
+        const applicantsRaw =
+          text('.num-applicants__caption') ||
+          (() => {
+            const tvm = Array.from(document.querySelectorAll('span.tvm__text'))
+              .map((el) => el.textContent?.trim() || '');
+            return tvm.find((t) => /applicants?|candidatura/i.test(t)) || '';
+          })();
+
+        // Workplace tag — usually only present on auth layout.
+        const workplaceRaw = (() => {
+          const tvm = Array.from(document.querySelectorAll('span.tvm__text'))
+            .map((el) => el.textContent?.trim() || '');
+          return (
+            tvm.find((t) =>
+              /(remote|hybrid|on-?site|remoto|híbrido|presencial)/i.test(t),
+            ) || ''
+          );
+        })();
 
         const applicantsMatch = applicantsRaw.match(/(\d[\d,.]*)/);
         const applicants = applicantsMatch
