@@ -1,41 +1,33 @@
 /**
- * Patchright launch + context defaults.
+ * Patchright launch options aligned with upstream "Best Practice" (Sprint 1.5.3).
  *
- * Patchright is a Playwright fork that ships with anti-bot patches built in
- * (webdriver flag, canvas/WebGL noise, navigator.plugins, etc.). The defaults
- * here are belt-and-suspenders on top of those patches — see PLAN.md
- * `## Browser pool design` for the rationale on Patchright vs. vanilla.
+ * Patchright README (https://github.com/Kaliiiiiiiiii-Vinyzu/patchright-nodejs)
+ * explicitly recommends:
+ *
+ *   chromium.launchPersistentContext("...", {
+ *     channel: "chrome",     // bundled chromium acceptable on linux/arm64
+ *     headless: false,        // visible window (use xvfb on Linux servers)
+ *     viewport: null,         // do NOT override viewport
+ *     // do NOT add custom userAgent or browser headers
+ *   });
+ *
+ * VPS is linux/arm64 — Google Chrome is not published for arm64, so we use the
+ * bundled Patchright Chromium (`channel` omitted). The Dockerfile installs
+ * xvfb + xauth and the runtime ENTRYPOINT wraps node in `xvfb-run` so the
+ * `headless: false` Chromium has a virtual X display to attach to.
+ *
+ * Patchright handles webdriver/canvas/WebGL/navigator.plugins automatically.
+ * This module deliberately exposes ONLY the launch flags. `BrowserContextOptions`
+ * is NOT exported anymore — we pass nothing custom to launchPersistentContext.
  */
-import type { LaunchOptions, BrowserContext, BrowserContextOptions } from 'patchright';
+import type { LaunchOptions } from 'patchright';
 
 export const launchOptions: LaunchOptions = {
-  headless: true,
+  // Patchright README: "headless: false" is the only reliably undetected mode.
+  headless: false,
   args: [
     '--disable-blink-features=AutomationControlled',
     '--disable-dev-shm-usage',
     '--no-sandbox',
   ],
 };
-
-export const contextDefaults: BrowserContextOptions = {
-  viewport: { width: 1920, height: 1080 },
-  userAgent:
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-  locale: 'pt-BR',
-  timezoneId: 'America/Sao_Paulo',
-  // Patchright handles webdriver/canvas/webgl spoofing automatically.
-};
-
-/**
- * Optional extra hardening. Idempotent — safe to call multiple times on the
- * same context (Playwright dedupes init scripts by content). Most spoofing
- * already happens inside Patchright; this is just a navigator.languages
- * sanity guarantee that some anti-bot scripts probe.
- */
-export async function applyAntiDetect(context: BrowserContext): Promise<void> {
-  await context.addInitScript(() => {
-    Object.defineProperty(navigator, 'languages', {
-      get: () => ['pt-BR', 'pt', 'en-US', 'en'],
-    });
-  });
-}

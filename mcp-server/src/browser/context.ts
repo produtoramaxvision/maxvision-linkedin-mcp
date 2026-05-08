@@ -1,27 +1,25 @@
 /**
- * Per-account browser context creation.
+ * Cookie hydration helper — Sprint 1.5.3.
  *
- * Decrypts the account's li_at cookie, opens a fresh BrowserContext on the
- * shared Patchright Browser (managed by browser/pool.ts), applies anti-detect
- * init scripts, and hydrates the LinkedIn session cookie.
+ * Decrypts the account's li_at and writes it into a BrowserContext via
+ * `addCookies`. Used by browser/pool.ts after launchPersistentContext returns
+ * (or whenever cookie rotation is needed).
  *
- * Does NOT manage lifetime — the pool owns when to close the context.
+ * The pool now owns context lifetime via launchPersistentContext per
+ * accountId, so this module shrinks to a pure cookie-injection function.
  */
-import type { Browser, BrowserContext } from 'patchright';
-import { applyAntiDetect, contextDefaults } from './anti-detect.js';
+import type { BrowserContext } from 'patchright';
 import { decryptCookie } from '../auth/cookies.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
-export async function createContextForAccount(
-  browser: Browser,
+const LINKEDIN_COOKIE_DOMAIN = '.linkedin.com';
+
+export async function hydrateLinkedInCookie(
+  ctx: BrowserContext,
   accountId: string,
   cookieBlob: Buffer,
-  cookieDomain = '.linkedin.com',
-): Promise<BrowserContext> {
-  const ctx = await browser.newContext(contextDefaults);
-  await applyAntiDetect(ctx);
-
+): Promise<void> {
   let cookieValue: string;
   try {
     cookieValue = decryptCookie(cookieBlob);
@@ -34,14 +32,11 @@ export async function createContextForAccount(
     );
   }
 
-  // li_at is the LinkedIn session cookie. Hydrate before any navigation so
-  // the first request lands authenticated and avoids the public-facing
-  // pre-login redirect chain (which sometimes triggers extra fingerprinting).
   await ctx.addCookies([
     {
       name: 'li_at',
       value: cookieValue,
-      domain: cookieDomain,
+      domain: LINKEDIN_COOKIE_DOMAIN,
       path: '/',
       httpOnly: true,
       secure: true,
@@ -50,5 +45,4 @@ export async function createContextForAccount(
   ]);
 
   logger.debug({ accountId }, 'browser context hydrated with li_at cookie');
-  return ctx;
 }

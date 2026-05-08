@@ -1,21 +1,28 @@
 /**
- * BrowserPool — warm pool of Patchright contexts keyed by accountId.
+ * BrowserPool — per-account Patchright `launchPersistentContext` (Sprint 1.5.3).
  *
- * Sprint 1 cap: maxSize = 2 contexts. The pool reuses an idle, fresh context
- * for the same account (LRU-ish: oldest-first eviction once full).
+ * Aligned with Patchright "Best Practice" anti-detect:
+ *   - launchPersistentContext (NOT browser.newContext) so the per-account
+ *     profile dir persists state (localStorage, IndexedDB, fingerprint stable).
+ *   - headless: false + xvfb on Linux servers (LinkedIn detects HeadlessChrome).
+ *   - no custom userAgent / viewport overrides.
  *
- * - The `Browser` is a single shared Chromium process (cheap, expensive to
- *   relaunch) — created lazily on first acquire.
- * - Each `BrowserContext` is account-scoped (cookies, storage, fingerprint).
- *   Context age caps at 30 min so cookie/state drift doesn't accumulate.
- * - `release()` flips inUse without closing — the next caller for the same
- *   account reuses the warm context.
+ * The pool keeps one open context per accountId, recycled if older than
+ * `maxAgeMs` (cookie/state drift cap). Each accountId launches its own
+ * Chromium process — heavy but necessary for fingerprint isolation. Sprint 1
+ * caps at sandbox-1 + 1-2 paid accounts so memory cost is bounded.
+ *
+ * Profile directory is `${PROFILE_BASE_DIR}/<accountId>/`. In production the
+ * stack mounts a Docker volume on /data/profiles so state survives container
+ * restarts.
  *
  * NOT thread-safe across processes; designed for the single Node process model.
  */
-import { chromium, type Browser, type BrowserContext } from 'patchright';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { chromium, type BrowserContext } from 'patchright';
 import { launchOptions } from './anti-detect.js';
-import { createContextForAccount } from './context.js';
+import { hydrateLinkedInCookie } from './context.js';
 import { getAccountById } from '../db/repos/accounts.repo.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
@@ -25,49 +32,67 @@ interface PoolEntry {
   accountId: string;
   inUse: boolean;
   createdAt: number;
+  profileDir: string;
 }
 
+const PROFILE_BASE_DIR = process.env['PROFILE_BASE_DIR'] ?? '/data/profiles';
+
 class BrowserPool {
-  private browser: Browser | null = null;
-  private entries: PoolEntry[] = [];
-  private readonly maxSize = 2;
+  private entries: Map<string, PoolEntry> = new Map();
   private readonly maxAgeMs = 30 * 60 * 1000;
 
-  private async getBrowser(): Promise<Browser> {
-    if (this.browser && this.browser.isConnected()) return this.browser;
-    this.browser = await chromium.launch(launchOptions);
-    logger.info('patchright browser launched');
-    return this.browser;
+  private async profileDirFor(accountId: string): Promise<string> {
+    // Sanitize: accountId already validated upstream against [a-z0-9_-]+ via
+    // Zod, but defense-in-depth — never let path traversal slip through.
+    const safe = accountId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const dir = path.join(PROFILE_BASE_DIR, safe);
+    await fs.mkdir(dir, { recursive: true });
+    return dir;
   }
 
   async acquire(accountId: string): Promise<{ context: BrowserContext; release: () => void }> {
-    // Reuse a free, fresh entry for this account if available.
-    const idx = this.entries.findIndex(
-      (e) =>
-        e.accountId === accountId &&
-        !e.inUse &&
-        Date.now() - e.createdAt < this.maxAgeMs,
-    );
-    let entry: PoolEntry;
-    if (idx >= 0) {
-      entry = this.entries[idx]!;
-      entry.inUse = true;
-    } else {
-      // Evict oldest when at capacity. Sprint 1 keeps eviction strictly LRU
-      // by insertion order (entries[] is FIFO).
-      if (this.entries.length >= this.maxSize) {
-        const oldest = this.entries.shift()!;
-        await oldest.context.close().catch(() => {});
-      }
-      const account = await getAccountById(accountId);
-      if (!account) throw new AppError('UNKNOWN', `Account not found: ${accountId}`);
-      const browser = await this.getBrowser();
-      const ctx = await createContextForAccount(browser, accountId, account.cookieEncrypted);
-      entry = { context: ctx, accountId, inUse: true, createdAt: Date.now() };
-      this.entries.push(entry);
+    const existing = this.entries.get(accountId);
+    if (existing && !existing.inUse && Date.now() - existing.createdAt < this.maxAgeMs) {
+      existing.inUse = true;
+      return {
+        context: existing.context,
+        release: () => {
+          existing.inUse = false;
+        },
+      };
     }
+
+    if (existing) {
+      await existing.context.close().catch((err) => {
+        logger.warn({ accountId, err: (err as Error).message }, 'context close error (ignored)');
+      });
+      this.entries.delete(accountId);
+    }
+
+    const account = await getAccountById(accountId);
+    if (!account) throw new AppError('UNKNOWN', `Account not found: ${accountId}`);
+
+    const profileDir = await this.profileDirFor(accountId);
+    logger.info({ accountId, profileDir }, 'launching persistent context');
+
+    const ctx = await chromium.launchPersistentContext(profileDir, launchOptions);
+
+    // Always re-hydrate cookie on launch — even with persistent profile, the
+    // accounts table is the source of truth and may have a fresh cookie from
+    // a recent /linkedin-cookie-refresh call.
+    await hydrateLinkedInCookie(ctx, accountId, account.cookieEncrypted);
+
+    const entry: PoolEntry = {
+      context: ctx,
+      accountId,
+      inUse: true,
+      createdAt: Date.now(),
+      profileDir,
+    };
+    this.entries.set(accountId, entry);
+
     return {
-      context: entry.context,
+      context: ctx,
       release: () => {
         entry.inUse = false;
       },
@@ -75,22 +100,19 @@ class BrowserPool {
   }
 
   async shutdown(): Promise<void> {
-    for (const e of this.entries) {
-      await e.context.close().catch(() => {});
+    for (const entry of this.entries.values()) {
+      await entry.context.close().catch(() => {});
     }
-    this.entries = [];
-    if (this.browser) {
-      await this.browser.close().catch(() => {});
-      this.browser = null;
-    }
+    this.entries.clear();
   }
 
   /** Snapshot of pool state for /health diagnostics. Cheap, sync. */
   getStats(): { size: number; inUse: number } {
-    return {
-      size: this.entries.length,
-      inUse: this.entries.filter((e) => e.inUse).length,
-    };
+    let inUse = 0;
+    for (const e of this.entries.values()) {
+      if (e.inUse) inUse++;
+    }
+    return { size: this.entries.size, inUse };
   }
 }
 
