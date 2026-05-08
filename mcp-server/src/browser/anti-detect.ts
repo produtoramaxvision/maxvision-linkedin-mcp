@@ -17,10 +17,24 @@
  * `headless: false` Chromium has a virtual X display to attach to.
  *
  * Patchright handles webdriver/canvas/WebGL/navigator.plugins automatically.
- * This module deliberately exposes ONLY the launch flags. `BrowserContextOptions`
- * is NOT exported anymore — we pass nothing custom to launchPersistentContext.
+ *
+ * Sprint 6.5 — proxy support for LinkedIn authwall bypass:
+ *   PATCHRIGHT_PROXY_URL env can carry a SOCKS5/HTTP proxy URL routing the
+ *   browser through:
+ *     - User's local machine (via SSH reverse tunnel — see docs/tunnel.md)
+ *     - Tailscale mesh peer (the user's laptop runs a tailscaled SOCKS5)
+ *     - Residential proxy provider (BrightData, Smartproxy, etc.)
+ *     - Cloudflare WARP outbound from VPS
+ *
+ *   Format: `socks5://user:pass@host:port` or `http://user:pass@host:port`.
+ *   Optional `PATCHRIGHT_PROXY_BYPASS` for `<-loopback>;localhost;127.0.0.1`.
  */
 import type { LaunchOptions } from 'patchright';
+
+const proxyServer = process.env['PATCHRIGHT_PROXY_URL'];
+const proxyBypass = process.env['PATCHRIGHT_PROXY_BYPASS'] ?? '<-loopback>';
+const proxyUsername = process.env['PATCHRIGHT_PROXY_USERNAME'];
+const proxyPassword = process.env['PATCHRIGHT_PROXY_PASSWORD'];
 
 export const launchOptions: LaunchOptions = {
   // Patchright README: "headless: false" is the only reliably undetected mode.
@@ -30,4 +44,14 @@ export const launchOptions: LaunchOptions = {
     '--disable-dev-shm-usage',
     '--no-sandbox',
   ],
+  ...(proxyServer
+    ? {
+        proxy: {
+          server: proxyServer,
+          bypass: proxyBypass,
+          ...(proxyUsername ? { username: proxyUsername } : {}),
+          ...(proxyPassword ? { password: proxyPassword } : {}),
+        },
+      }
+    : {}),
 };
