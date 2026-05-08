@@ -10,7 +10,26 @@ Emits JSON to stdout on success (array of job dicts). Non-zero exit on error.
 """
 import argparse
 import json
+import math
 import sys
+
+
+def _coerce(v):
+    """Normalize pandas/numpy values into JSON-safe primitives.
+
+    pandas DataFrame.to_dict() leaves NaN floats and pandas Timestamps in the
+    payload, both of which json.dumps either chokes on (Timestamp) or emits as
+    invalid JSON literals (NaN). The TypeScript caller treats this as
+    SCRAPER_FAIL because its JSON.parse barfs on `NaN`. Convert NaN -> None and
+    everything non-primitive -> str().
+    """
+    if v is None:
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    if isinstance(v, (str, int, float, bool)):
+        return v
+    return str(v)
 
 try:
     from jobspy import scrape_jobs
@@ -50,14 +69,12 @@ def main() -> int:
         return 0
 
     records = df.to_dict(orient="records")
-    cleaned = []
-    for r in records:
-        cleaned.append({
-            k: (None if v is None else (v if isinstance(v, (str, int, float, bool)) else str(v)))
-            for k, v in r.items()
-        })
+    cleaned = [{k: _coerce(v) for k, v in r.items()} for r in records]
 
-    print(json.dumps(cleaned, ensure_ascii=False))
+    # allow_nan=False is defense-in-depth: if _coerce ever misses a NaN, fail
+    # loud with ValueError instead of emitting invalid JSON the TS caller
+    # cannot parse.
+    print(json.dumps(cleaned, ensure_ascii=False, allow_nan=False))
     return 0
 
 
