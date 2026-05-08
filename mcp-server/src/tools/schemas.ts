@@ -54,3 +54,52 @@ export const SearchJobsInputShape = {
 
 export const SearchJobsInputSchema = z.object(SearchJobsInputShape);
 export type SearchJobsInput = z.infer<typeof SearchJobsInputSchema>;
+
+// ----------------------------------------------------------------------------
+// get_profile — input.
+// ----------------------------------------------------------------------------
+
+export const GetProfileInputShape = {
+  accountId: AccountIdSchema,
+  profileUrl: ProfileUrlSchema.describe(
+    'Canonical LinkedIn profile URL (https://www.linkedin.com/in/<slug>)',
+  ),
+};
+
+export const GetProfileInputSchema = z.object(GetProfileInputShape);
+export type GetProfileInput = z.infer<typeof GetProfileInputSchema>;
+
+// ----------------------------------------------------------------------------
+// get_job_details — input.
+// ----------------------------------------------------------------------------
+
+export const JobUrlSchema = z
+  .string()
+  .url()
+  .regex(/linkedin\.com\/jobs\/view\/\d+/, 'Must be /jobs/view/<id>');
+
+export const GetJobDetailsInputShape = {
+  accountId: AccountIdSchema,
+  jobUrl: JobUrlSchema.describe('Canonical LinkedIn job URL'),
+};
+
+export const GetJobDetailsInputSchema = z.object(GetJobDetailsInputShape);
+export type GetJobDetailsInput = z.infer<typeof GetJobDetailsInputSchema>;
+
+// ----------------------------------------------------------------------------
+// track_application — input.
+// ----------------------------------------------------------------------------
+
+export const TrackApplicationInputShape = {
+  accountId: AccountIdSchema,
+  jobUrl: z.string().url(),
+  jobTitle: z.string().optional(),
+  company: z.string().optional(),
+  status: ApplicationStatusSchema.default('saved'),
+  notes: z.string().optional(),
+  resumeUsed: z.string().optional(),
+  coverLetter: z.string().optional(),
+};
+
+export const TrackApplicationInputSchema = z.object(TrackApplicationInputShape);
+export type TrackApplicationInput = z.infer<typeof TrackApplicationInputSchema>;
