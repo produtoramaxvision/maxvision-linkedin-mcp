@@ -11,7 +11,7 @@ import { GetCompanyInfoInputSchema, type GetCompanyInfoInput } from './schemas.j
 import { runApifyActor } from '../scrapers/apify-helper.js';
 import { logger } from '../logger.js';
 
-const ACTOR = process.env['APIFY_LINKEDIN_COMPANY_INFO_ACTOR'] ?? 'harvestapi~linkedin-company-info';
+const ACTOR = process.env['APIFY_LINKEDIN_COMPANY_INFO_ACTOR'] ?? 'harvestapi~linkedin-company';
 
 export interface CompanyInfo {
   url: string;

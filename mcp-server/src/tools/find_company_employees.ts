@@ -9,7 +9,10 @@ import { FindCompanyEmployeesInputSchema, type FindCompanyEmployeesInput } from 
 import { runApifyActor } from '../scrapers/apify-helper.js';
 import { logger } from '../logger.js';
 
-const ACTOR = process.env['APIFY_LINKEDIN_COMPANY_EMPLOYEES_ACTOR'] ?? 'harvestapi~linkedin-company-employees';
+// harvestapi catalog has no dedicated `linkedin-company-employees` actor —
+// instead we use `linkedin-profile-search` with `currentCompanies` filter,
+// which returns profiles employed at the target company.
+const ACTOR = process.env['APIFY_LINKEDIN_COMPANY_EMPLOYEES_ACTOR'] ?? 'harvestapi~linkedin-profile-search';
 
 interface EmployeeResult {
   url: string;
@@ -32,11 +35,14 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
   handler: async ({ input, accountId }) => {
     logger.info({ accountId, companyUrl: input.companyUrl }, 'find_company_employees start');
 
+    // linkedin-profile-search input: currentCompanies (URL array) + optional
+    // jobTitle keyword and location filter.
     const apifyInput: Record<string, unknown> = {
-      companyUrls: [input.companyUrl],
+      currentCompanies: [input.companyUrl],
       maxItems: input.maxResults,
+      profileScraperMode: 'short',
     };
-    if (input.jobTitle) apifyInput['jobTitle'] = input.jobTitle;
+    if (input.jobTitle) apifyInput['keywords'] = input.jobTitle;
     if (input.location) apifyInput['locations'] = [input.location];
 
     const items = await runApifyActor({ actor: ACTOR, context: 'find_company_employees', input: apifyInput });
