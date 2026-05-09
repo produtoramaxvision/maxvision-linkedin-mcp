@@ -6,6 +6,22 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.3 — search_companies actor field name)
+
+- **CRITICAL BUG 5 root cause**: `harvestapi/linkedin-company-search` actor
+  expects input field `searchQuery` (NOT `keywords`). v0.13.2 sent `keywords`
+  which the actor silently ignored, returning `[]` for every query. v0.13.3
+  switches to the documented field name and adds `scraperMode: "full"` for
+  enriched results.
+- **search_companies field mapping** rewritten for actor's actual schema:
+  - `industries` is array of `{id, name, urn, title, hierarchy}` — extract
+    first.name (not raw stringify).
+  - `locations` is array — pick HQ entry (`headquarter: true`) or first,
+    use `parsed.text` for canonical "City, State, Country" format.
+  - `companySize` derived from `employeeCountRange` `{start, end}` →
+    "501-1000" bucket string.
+  - `followerCount` (number) primary; `followers`/`followersCount` fallback.
+
 ### Fixed (v0.13.2 — production-readiness pass)
 
 - **CRITICAL: `default` accountId fallback** (`mcp-server/src/db/repos/accounts.repo.ts`)
