@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-marketplace.json",
+  "name": "maxvision-linkedin",
+  "description": "MaxVision LinkedIn Suite — 15 LinkedIn automation tools (search/apply/profile/feed/optimize/companies/employees/posts) via hosted MCP server.",
+  "version": "0.13.0",
+  "owner": {
+    "name": "MaxVision Produtora",
+    "email": "produtoramaxvision@gmail.com",
+    "url": "https://produtoramaxvision.com.br"
+  },
+  "metadata": {
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "linkedin-maxvision",
+      "source": "./plugins/linkedin-maxvision",
+      "description": "LinkedIn automation suite: 15 tools (search_jobs, get_profile, get_company_info, search_companies, find_company_employees, get_profile_activity, monitor_post_engagement, search_people, list_feed, post_update, apply_easy, send_message, optimize_profile, get_job_details, track_application). Apify-backed (harvestapi catalog). Free / Pro / Agency tiers via Stripe license.",
+      "version": "0.13.0",
+      "category": "productivity",
+      "keywords": ["linkedin", "automation", "job-search", "career", "mcp", "apify", "harvestapi"],
+      "author": {
+        "name": "MaxVision Produtora",
+        "email": "produtoramaxvision@gmail.com"
+      },
+      "homepage": "https://linkedin.produtoramaxvision.com.br",
+      "license": "AGPL-3.0"
+    }
+  ]
+}
