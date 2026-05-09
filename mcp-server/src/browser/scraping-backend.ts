@@ -365,10 +365,10 @@ export async function scrape(args: ScrapeRequest): Promise<ScrapeResult | null> 
     return apifyFetch(args, cfg);
   }
   if (cfg.backend === 'brightdata') {
-    throw new AppError(
-      'NOT_IMPLEMENTED',
-      'BrightData backend wiring lands in Sprint 6.4 (browserPool.connectOverCDP)',
-    );
+    // BrightData wires inside browserPool (Sprint 6.6) — caller should
+    // fall back to the browserPool path. Returning null tells fetchAndParse
+    // to use Patchright/CDP flow.
+    return null;
   }
   throw new AppError('CONFIG_FAIL', `Unknown SCRAPING_BACKEND: ${cfg.backend}`);
 }
