@@ -12,8 +12,62 @@ import { withInstrumentation } from './_base.js';
 import { OptimizeProfileInputSchema, type OptimizeProfileInput } from './schemas.js';
 import { invokeLlm } from '../auth/llm-provider.js';
 import { tavilyExtract } from '../browser/content-extract.js';
+import { scrapeProfile, type ProfileData } from '../scrapers/linkedin-profile.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
+
+/**
+ * Detects LinkedIn anti-scrape page that Tavily returns for low-visibility
+ * profiles (renders multilingual "Page not found" instead of public preview).
+ * Bill Gates (30M followers) → public preview liberado. Max Müller (10
+ * conexões) → 404 multilingual. Pattern check covers EN/PT/ES/AR/CS markers
+ * present in LinkedIn's i18n 404 page.
+ */
+function isLinkedInAntiScrapePage(text: string): boolean {
+  const head = text.slice(0, 2000);
+  return (
+    /Page not found/i.test(head) ||
+    /Stránka nenalezena/i.test(head) ||
+    /Página não encontrada/i.test(head) ||
+    /Página no encontrada/i.test(head) ||
+    /لم يتم العثور على الصفحة/.test(head) ||
+    /Siden blev ikke fundet/i.test(head) ||
+    (/# LinkedIn/i.test(head) && /選擇語言/.test(head)) // multi-lang lang switcher header
+  );
+}
+
+/**
+ * Render Apify ProfileData as plain text suitable for LLM analysis.
+ * Same shape across providers — keeps optimize_profile prompt stable.
+ */
+function profileDataToText(p: ProfileData): string {
+  const lines: string[] = [
+    p.fullName,
+    p.headline,
+    `Location: ${p.location}`,
+  ];
+  if (p.currentCompany || p.currentRole) {
+    lines.push(`Current: ${p.currentRole ?? ''} @ ${p.currentCompany ?? ''}`);
+  }
+  if (p.summary) lines.push('', 'Summary:', p.summary);
+  if (p.experience.length > 0) {
+    lines.push('', 'Experience:');
+    for (const e of p.experience) {
+      lines.push(`- ${e.title} @ ${e.company} (${e.startDate}-${e.endDate}) ${e.location ?? ''}`);
+      if (e.description) lines.push(`  ${e.description}`);
+    }
+  }
+  if (p.education.length > 0) {
+    lines.push('', 'Education:');
+    for (const ed of p.education) {
+      lines.push(`- ${ed.school}${ed.startYear ? ` (${ed.startYear}-${ed.endYear})` : ''}`);
+    }
+  }
+  if (p.skills.length > 0) {
+    lines.push('', 'Skills: ' + p.skills.slice(0, 30).join(', '));
+  }
+  return lines.join('\n');
+}
 
 interface OptimizeProfileOutput {
   targetRole: string;
@@ -50,39 +104,75 @@ export const optimizeProfile = withInstrumentation<OptimizeProfileInput, Optimiz
     'Analyze a LinkedIn profile against a target role using Claude (Sprint 2). Requires ANTHROPIC_API_KEY env on the MCP server.',
   inputSchema: OptimizeProfileInputSchema,
   handler: async ({ input, accountId }) => {
-    // Resolve profile text:
-    // 1. Use input.profileText if supplied (manual paste, fastest path).
-    // 2. Else if input.profileUrl + TAVILY_API_KEY is set, call Tavily Extract
-    //    for public-page content extraction (markdown). LinkedIn protected
-    //    pages still authwall server-side; Tavily works on public profile
-    //    previews + public posts.
-    // 3. Else fail VALIDATION_FAIL with a clear hint.
+    // Resolve profile text. Priority:
+    //   1. input.profileText (manual paste — fastest, free)
+    //   2. input.profileUrl + TAVILY_API_KEY → Tavily Extract (public preview)
+    //      - if Tavily returns LinkedIn anti-scrape 404 page, fall through
+    //   3. input.profileUrl + Apify (get_profile path) → reliable for any
+    //      profile (uses authenticated pool internally)
+    //   4. Fail VALIDATION_FAIL
     let profileText = input.profileText;
-    if (!profileText && input.profileUrl) {
+    let textSource: 'manual' | 'tavily' | 'apify' = 'manual';
+
+    // Layer 2 — Tavily (cheap when it works; ~$0/call w/ 1k free tier).
+    if (!profileText && input.profileUrl && process.env['TAVILY_API_KEY']) {
       try {
         const extracted = await tavilyExtract([input.profileUrl]);
-        profileText = extracted[0]?.rawContent;
-        logger.info(
-          { accountId, profileUrl: input.profileUrl, len: profileText?.length ?? 0 },
-          'optimize_profile tavily extract ok',
-        );
+        const candidate = extracted[0]?.rawContent ?? '';
+        if (candidate && !isLinkedInAntiScrapePage(candidate)) {
+          profileText = candidate;
+          textSource = 'tavily';
+          logger.info(
+            { accountId, profileUrl: input.profileUrl, len: candidate.length, source: 'tavily' },
+            'optimize_profile tavily extract ok',
+          );
+        } else {
+          logger.warn(
+            { accountId, profileUrl: input.profileUrl, len: candidate.length },
+            'tavily returned LinkedIn anti-scrape 404 page — falling through to Apify',
+          );
+        }
       } catch (err) {
         logger.warn(
           { err: (err as Error).message, profileUrl: input.profileUrl },
-          'tavily extract failed, falling back to manual profileText requirement',
+          'tavily extract threw — falling through to Apify',
         );
       }
     }
+
+    // Layer 3 — Apify (works for any profile, costs ~$0.024/call).
+    if (!profileText && input.profileUrl) {
+      try {
+        const profile = await scrapeProfile({ accountId, profileUrl: input.profileUrl });
+        profileText = profileDataToText(profile);
+        textSource = 'apify';
+        logger.info(
+          { accountId, profileUrl: input.profileUrl, len: profileText.length, source: 'apify', name: profile.fullName },
+          'optimize_profile apify fallback ok',
+        );
+      } catch (err) {
+        logger.error(
+          { err: (err as Error).message, profileUrl: input.profileUrl },
+          'optimize_profile apify fallback also failed',
+        );
+        throw new AppError(
+          'EXTERNAL_API_FAIL',
+          `Both Tavily and Apify could not extract profile from ${input.profileUrl}. Pass profileText manually as workaround.`,
+          { tool: 'optimize_profile', profileUrl: input.profileUrl },
+        );
+      }
+    }
+
     if (!profileText) {
       throw new AppError(
         'VALIDATION_FAIL',
-        'Supply profileText directly OR set TAVILY_API_KEY env + pass profileUrl to enable auto-extract.',
+        'Supply profileText directly OR pass profileUrl (with TAVILY_API_KEY or APIFY_TOKEN env set on server).',
         { tool: 'optimize_profile' },
       );
     }
 
     logger.info(
-      { accountId, targetRole: input.targetRole, len: profileText.length },
+      { accountId, targetRole: input.targetRole, len: profileText.length, textSource },
       'optimize_profile invoked',
     );
 
