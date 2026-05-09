@@ -51,14 +51,17 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
       const page = await context.newPage();
       logger.info({ accountId }, 'get_account_owner nav /feed start');
 
-      // v0.13.8: navigate /me with `domcontentloaded` (avoids LinkedIn
-      // analytics-beacon hangs that block 'load'). Then in priority order:
-      //   1. final URL slug (LinkedIn redirected to /in/<slug>/)
-      //   2. <link rel="canonical"> href (rendered server-side)
-      //   3. <meta property="og:url"> content
-      //   4. <a class="global-nav__me-photo"> href (nav bar avatar)
-      //   5. legacy /feed 3-layer scrape (last resort, expensive)
-      const meResponse = await page.goto('https://www.linkedin.com/me/', {
+      // v0.13.9: hit voyager API directly inside the browser context.
+      // Patchright fetch() auto-sends hydrated cookies. Endpoint
+      // /voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=me
+      // returns the viewer's miniProfile (firstName, lastName,
+      // publicIdentifier, headline). Bypasses /feed and /me HTML scrape.
+      // Requires `csrf-token` header (= JSESSIONID stripped of quotes).
+      // Lighter + faster + robust to layout drift.
+      //
+      // First navigate to www.linkedin.com (DNS warmup) so the fetch()
+      // sends cookies for the linkedin.com domain.
+      const meResponse = await page.goto('https://www.linkedin.com/', {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
       });
@@ -72,53 +75,88 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
         finalMeUrl.includes('/uas/login') ||
         finalMeUrl.includes('/checkpoint')
       ) {
-        throw new AppError('COOKIE_EXPIRED', `Auth wall on /me for ${accountId}`, {
+        throw new AppError('COOKIE_EXPIRED', `Auth wall on landing for ${accountId}`, {
           redirectedTo: finalMeUrl,
         });
       }
 
-      // Layer 1 — final URL slug (LinkedIn followed /me redirect).
-      let slug = finalMeUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-
-      // Layers 2-4 — DOM/meta extraction. Cheap; runs even when slug found
-      // so we capture fullName + headline as enrichment.
-      const dom = await page.evaluate((): {
-        canonical: string;
-        ogUrl: string;
-        navPhoto: string;
-        fullName: string;
+      // Voyager API call from inside the browser (cookies auto-attached).
+      // csrf-token = JSESSIONID cookie value with surrounding quotes stripped.
+      const voyagerResult = await page.evaluate(async (): Promise<{
+        ok: boolean;
+        status: number;
+        slug: string;
+        firstName: string;
+        lastName: string;
         headline: string;
-      } => {
-        const canonical = (document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null)?.href ?? '';
-        const ogUrl = (document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null)?.content ?? '';
-        const navPhoto = (document.querySelector('a.global-nav__me-photo, a[data-test-app-aware-link][href*="/in/"]') as HTMLAnchorElement | null)?.href ?? '';
-        const titleEl = document.querySelector('h1.text-heading-xlarge, h1');
-        const fullName = (titleEl?.textContent ?? '').trim();
-        const headlineEl = document.querySelector('.text-body-medium, [data-test-id="hero-title"] + div');
-        const headline = (headlineEl?.textContent ?? '').trim();
-        return { canonical, ogUrl, navPhoto, fullName, headline };
+        body: string;
+      }> => {
+        const csrfMatch = document.cookie.match(/JSESSIONID="?([^";]+)"?/);
+        const csrf = csrfMatch?.[1] ?? '';
+        try {
+          const r = await fetch(
+            'https://www.linkedin.com/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=me&decorationId=com.linkedin.voyager.dash.deco.identity.profile.WebProfileLite-12',
+            {
+              headers: {
+                'csrf-token': csrf,
+                'x-restli-protocol-version': '2.0.0',
+                accept: 'application/vnd.linkedin.normalized+json+2.1',
+              },
+              credentials: 'include',
+            },
+          );
+          const txt = await r.text();
+          if (!r.ok) {
+            return { ok: false, status: r.status, slug: '', firstName: '', lastName: '', headline: '', body: txt.slice(0, 400) };
+          }
+          let parsed: unknown;
+          try { parsed = JSON.parse(txt); } catch { parsed = null; }
+          // Walk the JSON for first miniProfile / Profile entity.
+          const stack: unknown[] = [parsed];
+          let slug = ''; let firstName = ''; let lastName = ''; let headline = '';
+          while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            const o = node as Record<string, unknown>;
+            const pid = typeof o['publicIdentifier'] === 'string' ? o['publicIdentifier'] : '';
+            const fn = typeof o['firstName'] === 'string' ? o['firstName'] : '';
+            const ln = typeof o['lastName'] === 'string' ? o['lastName'] : '';
+            const hl = typeof o['headline'] === 'string' ? o['headline'] : (typeof o['occupation'] === 'string' ? o['occupation'] : '');
+            if (pid && (fn || ln)) {
+              slug = pid; firstName = fn; lastName = ln; headline = hl;
+              break;
+            }
+            for (const v of Object.values(o)) {
+              if (v && typeof v === 'object') stack.push(v);
+            }
+          }
+          return { ok: true, status: r.status, slug, firstName, lastName, headline, body: '' };
+        } catch (err) {
+          return { ok: false, status: 0, slug: '', firstName: '', lastName: '', headline: '', body: String(err).slice(0, 400) };
+        }
       });
 
-      if (!slug) slug = dom.canonical.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-      if (!slug) slug = dom.ogUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-      if (!slug) slug = dom.navPhoto.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
-
-      if (slug) {
+      if (voyagerResult.ok && voyagerResult.slug) {
         await page.close();
-        logger.info({ accountId, slug, source: 'me-redirect' }, 'get_account_owner ok');
+        logger.info(
+          { accountId, slug: voyagerResult.slug, source: 'voyager-api' },
+          'get_account_owner ok via voyager',
+        );
         return {
           accountId,
-          slug,
-          profileUrl: `https://www.linkedin.com/in/${slug}/`,
-          fullName: dom.fullName,
-          headline: dom.headline,
+          slug: voyagerResult.slug,
+          profileUrl: `https://www.linkedin.com/in/${voyagerResult.slug}/`,
+          fullName: `${voyagerResult.firstName} ${voyagerResult.lastName}`.trim(),
+          headline: voyagerResult.headline,
           source: 'me-redirect',
         };
       }
 
-      // Last resort — /feed 3-layer scrape. Use domcontentloaded (not 'load')
-      // to avoid analytics-beacon hangs.
-      logger.warn({ accountId, finalMeUrl, dom }, '/me did not yield slug via any layer, falling back to /feed');
+      // Voyager failed — log diagnostics + fall through to legacy /feed scrape.
+      logger.warn(
+        { accountId, voyagerStatus: voyagerResult.status, voyagerBody: voyagerResult.body },
+        'voyager API failed, falling back to /feed scrape',
+      );
       await page.goto('https://www.linkedin.com/feed/', {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
