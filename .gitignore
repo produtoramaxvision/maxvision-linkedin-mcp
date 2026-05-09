@@ -13,3 +13,4 @@ secrets/*.json
 !secrets/.gitkeep
 coverage/
 .turbo/
+mcp-server/.cookie-capture-profile/
