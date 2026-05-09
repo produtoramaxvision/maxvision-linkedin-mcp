@@ -59,7 +59,19 @@ export interface ProfileData {
 
 const BD_DATASET_ID = process.env['BRIGHTDATA_LINKEDIN_PROFILE_DATASET_ID'] ?? 'gd_l1viktl72bvl7bjuj0';
 const BD_SCRAPER_ENDPOINT = 'https://api.brightdata.com/datasets/v3/scrape';
-const APIFY_PROFILE_ACTOR = process.env['APIFY_LINKEDIN_PROFILE_ACTOR'] ?? 'dev_fusion~linkedin-profile-scraper';
+/**
+ * Apify profile scraper actor. Default `harvestapi/linkedin-profile-scraper`
+ * (LpVuK3Zozwuipa5bp): $4/1k profile-only, $10/1k +email, no cookies needed,
+ * returns 50+ fields including skills (with endorsement counts), certifications,
+ * projects, languages, volunteer, courses, publications, honors. Strictly
+ * better than dev_fusion (single $10/1k flat) for our use case.
+ *
+ * Operator can override via APIFY_LINKEDIN_PROFILE_ACTOR env if a different
+ * actor better fits their workflow (e.g. `dev_fusion~linkedin-profile-scraper`
+ * for legacy compat).
+ */
+const APIFY_PROFILE_ACTOR = process.env['APIFY_LINKEDIN_PROFILE_ACTOR'] ?? 'harvestapi~linkedin-profile-scraper';
+const APIFY_INCLUDE_EMAIL = process.env['APIFY_LINKEDIN_PROFILE_INCLUDE_EMAIL'] !== 'false';
 const APIFY_RUN_ENDPOINT = 'https://api.apify.com/v2/acts';
 
 /**
@@ -188,6 +200,136 @@ async function scrapeProfileViaBrightDataAPI(args: {
  * Failure mode: if Apify call fails, we log and proceed with BD-only data —
  * skills/emails stay empty rather than failing the whole request.
  */
+/**
+ * Single-call profile scrape via Apify (harvestapi by default).
+ *
+ * Replaces the BD + dev_fusion hybrid path: harvestapi alone returns the full
+ * superset (50+ fields + skills + email + certifications + projects) at lower
+ * cost ($4-10/1k vs $11.50/1k for the hybrid). BrightData LinkedIn People
+ * Profile dataset is therefore unused for `get_profile` — BD remains in the
+ * stack only as a Web Unlocker proxy for `search_jobs` / `get_job_details`
+ * which need rendered HTML (no scraper API alternative).
+ */
+async function scrapeProfileViaApifyOnly(args: {
+  profileUrl: string;
+  slug: string;
+  apifyToken: string;
+}): Promise<ProfileData> {
+  const { profileUrl, slug, apifyToken } = args;
+  const url =
+    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(APIFY_PROFILE_ACTOR)}/run-sync-get-dataset-items` +
+    `?token=${encodeURIComponent(apifyToken)}&format=json`;
+
+  // harvestapi accepts both `profileUrls` (preferred) and `profileScraperMode`
+  // = "Profile details" | "Profile details + email search". We pick the email
+  // mode by default (set APIFY_LINKEDIN_PROFILE_INCLUDE_EMAIL=false to opt out).
+  const body = {
+    profileUrls: [profileUrl],
+    maxItems: 1,
+    profileScraperMode: APIFY_INCLUDE_EMAIL ? 'Profile details + email search ($10 per 1k)' : 'Profile details ($4 per 1k)',
+  };
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Apify ${res.status} (${APIFY_PROFILE_ACTOR}): ${errBody.slice(0, 300)}`,
+      { status: res.status, actor: APIFY_PROFILE_ACTOR },
+    );
+  }
+
+  const items = (await res.json()) as Array<Record<string, unknown>>;
+  const record = items[0];
+  if (!record) {
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Apify returned empty payload for ${profileUrl}`,
+      { actor: APIFY_PROFILE_ACTOR, profileUrl },
+    );
+  }
+
+  return mapApifyHarvestProfile(record, profileUrl, slug);
+}
+
+/**
+ * Map harvestapi/linkedin-profile-scraper output to internal ProfileData.
+ *
+ * Schema reference (validated 2026-05-09 from actor metadata):
+ *   - Top-level: id, name, headline, about, location, currentPosition,
+ *     experience[], education[], skills[], certifications[], projects[],
+ *     volunteer[], languages[], honors[], courses[], publications[],
+ *     emails (array of strings if available), publicIdentifier, url.
+ */
+function mapApifyHarvestProfile(raw: Record<string, unknown>, profileUrl: string, slug: string): ProfileData {
+  const get = <T>(key: string): T | undefined => raw[key] as T | undefined;
+  const str = (v: unknown): string => (v == null ? '' : String(v));
+
+  const exp = (get<unknown[]>('experience') ?? []) as Array<Record<string, unknown>>;
+  const experience: ProfileExperience[] = exp.slice(0, 25).map((e) => ({
+    title: str(e['title'] ?? e['position']),
+    company: str((e['company'] as Record<string, unknown> | undefined)?.['name'] ?? e['companyName'] ?? e['company']),
+    startDate: str(e['startDate'] ?? e['start_date']),
+    endDate: e['endDate'] != null ? str(e['endDate']) : (e['end_date'] != null ? str(e['end_date']) : null),
+    location: str(e['location']),
+    description: str(e['description']),
+  }));
+
+  const edu = (get<unknown[]>('education') ?? []) as Array<Record<string, unknown>>;
+  const education: ProfileEducation[] = edu.slice(0, 15).map((ed) => ({
+    school: str((ed['school'] as Record<string, unknown> | undefined)?.['name'] ?? ed['schoolName'] ?? ed['title'] ?? ed['school']),
+    degree: ed['degree'] != null ? str(ed['degree']) : undefined,
+    field: ed['field'] != null ? str(ed['field']) : (ed['fieldOfStudy'] != null ? str(ed['fieldOfStudy']) : undefined),
+    startYear: parseYear(ed['startYear'] ?? ed['start_year'] ?? ed['startDate']),
+    endYear: ed['endYear'] != null ? parseYear(ed['endYear']) : (ed['end_year'] != null ? parseYear(ed['end_year']) : null),
+  }));
+
+  const skillsRaw = (get<unknown[]>('skills') ?? []) as Array<Record<string, unknown> | string>;
+  const skills: string[] = skillsRaw
+    .slice(0, 50)
+    .map((s) => (typeof s === 'string' ? s : str((s as Record<string, unknown>)['name'] ?? (s as Record<string, unknown>)['title'])))
+    .filter((s) => s.length > 0);
+
+  const emailFields = ['email', 'emails', 'workEmail', 'verifiedEmail'];
+  const emails: string[] = [];
+  for (const f of emailFields) {
+    const v = raw[f];
+    if (typeof v === 'string' && v.includes('@')) emails.push(v);
+    if (Array.isArray(v)) {
+      for (const e of v) {
+        if (typeof e === 'string' && e.includes('@')) emails.push(e);
+      }
+    }
+  }
+
+  const currentPos = get<Record<string, unknown>>('currentPosition');
+  const currentCompany = currentPos
+    ? str(currentPos['companyName'] ?? (currentPos['company'] as Record<string, unknown> | undefined)?.['name'])
+    : experience[0]?.company ?? null;
+  const currentRole = currentPos ? str(currentPos['title']) : (experience[0]?.title ?? null);
+
+  return {
+    url: profileUrl,
+    publicId: slug,
+    fullName: str(get('name') ?? get('fullName')),
+    headline: str(get('headline') ?? get('position')),
+    location: str(get('location') ?? get('locationName') ?? get('city')),
+    currentCompany: currentCompany || null,
+    currentRole: currentRole || null,
+    summary: str(get('about') ?? get('summary') ?? get('bio')),
+    experience,
+    education,
+    skills,
+    ...(emails.length > 0 ? { emails: Array.from(new Set(emails)) } : {}),
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 async function enrichProfileViaApify(args: {
   profileUrl: string;
   apifyToken: string;
@@ -255,56 +397,66 @@ export async function scrapeProfile(args: {
   const { accountId, profileUrl } = args;
   const slug = extractPublicId(profileUrl);
 
-  const apiToken = process.env['BRIGHTDATA_API_TOKEN'];
   const apifyToken = process.env['APIFY_TOKEN'];
-  if (apiToken) {
+  const bdToken = process.env['BRIGHTDATA_API_TOKEN'];
+
+  // Path A (preferred) — Apify harvestapi/linkedin-profile-scraper single call
+  // returns the full superset (50+ fields + skills + email + certifications +
+  // projects). Cheaper and richer than the BD + dev_fusion hybrid for the same
+  // dataset. Configurable actor via APIFY_LINKEDIN_PROFILE_ACTOR.
+  if (apifyToken) {
     logger.info(
-      { accountId, profileUrl, slug, backend: 'brightdata-scraper-api', apifyEnrichment: !!apifyToken },
-      'profile fetch start (BrightData Scraper API)',
+      { accountId, profileUrl, slug, backend: 'apify', actor: APIFY_PROFILE_ACTOR, includeEmail: APIFY_INCLUDE_EMAIL },
+      'profile fetch start (Apify single-provider)',
     );
     try {
-      // Run BD (primary) and Apify (enrichment for skills + emails) in parallel.
-      // Apify is best-effort — if it fails, return BD-only data.
-      const [bdData, apifyResult] = await Promise.all([
-        scrapeProfileViaBrightDataAPI({ profileUrl, slug, apiToken }),
-        apifyToken
-          ? enrichProfileViaApify({ profileUrl, apifyToken }).catch((err) => {
-              logger.warn(
-                { accountId, slug, err: err instanceof Error ? err.message : String(err) },
-                'Apify enrichment failed — proceeding with BD-only data',
-              );
-              return { skills: [] as string[], emails: [] as string[] };
-            })
-          : Promise.resolve({ skills: [] as string[], emails: [] as string[] }),
-      ]);
-
-      const merged: ProfileData = {
-        ...bdData,
-        skills: apifyResult.skills.length > 0 ? apifyResult.skills : bdData.skills,
-        ...(apifyResult.emails.length > 0 ? { emails: apifyResult.emails } : {}),
-      };
-
+      const data = await scrapeProfileViaApifyOnly({ profileUrl, slug, apifyToken });
       logger.info(
         {
           accountId,
           slug,
-          name: merged.fullName,
+          name: data.fullName,
           fields: {
-            experience: merged.experience.length,
-            education: merged.education.length,
-            skills: merged.skills.length,
-            emails: merged.emails?.length ?? 0,
+            experience: data.experience.length,
+            education: data.education.length,
+            skills: data.skills.length,
+            emails: data.emails?.length ?? 0,
           },
         },
-        'profile scrape ok via BrightData + Apify hybrid',
+        'profile scrape ok via Apify',
       );
-      return merged;
+      return data;
+    } catch (err) {
+      logger.warn(
+        { accountId, slug, err: err instanceof Error ? err.message : String(err) },
+        'Apify profile scrape failed — falling back to BrightData (if configured) or HTML',
+      );
+      // Fall through to Path B (BD) or Path C (HTML)
+    }
+  }
+
+  // Path B (legacy hybrid) — BrightData LinkedIn People Profile dataset.
+  // Kept for operators who configured BD before Sprint 6.8 or who want to skip
+  // Apify entirely. BD alone returns 50+ fields but no skills/emails — these
+  // arrays will be empty unless Apify fallback enrichment runs.
+  if (bdToken) {
+    logger.info(
+      { accountId, profileUrl, slug, backend: 'brightdata-scraper-api' },
+      'profile fetch start (BrightData fallback)',
+    );
+    try {
+      const data = await scrapeProfileViaBrightDataAPI({ profileUrl, slug, apiToken: bdToken });
+      logger.info(
+        { accountId, slug, name: data.fullName, fields: { experience: data.experience.length, education: data.education.length, skills: data.skills.length } },
+        'profile scrape ok via BrightData (fallback path)',
+      );
+      return data;
     } catch (err) {
       logger.warn(
         { accountId, slug, err: err instanceof Error ? err.message : String(err) },
         'BrightData Scraper API failed — falling back to HTML scrape',
       );
-      // Fall through to Path B
+      // Fall through to Path C
     }
   }
 
