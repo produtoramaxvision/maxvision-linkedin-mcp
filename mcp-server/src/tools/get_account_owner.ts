@@ -29,7 +29,7 @@ export interface GetAccountOwnerOutput {
   profileUrl: string;
   fullName: string;
   headline: string;
-  source: 'meta' | 'json-ld' | 'rail-nav';
+  source: 'me-redirect' | 'meta' | 'json-ld' | 'rail-nav';
 }
 
 interface OwnerScrape {
@@ -51,27 +51,61 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
       const page = await context.newPage();
       logger.info({ accountId }, 'get_account_owner nav /feed start');
 
-      // /feed/ takes longer than guest pages because LinkedIn ships heavy
-      // hydrated state. Use `load` (not `domcontentloaded`) so the embedded
-      // <code id="bpr-guid-*"> JSON blobs are present when we evaluate.
-      const response = await page.goto('https://www.linkedin.com/feed/', {
+      // v0.13.7: prefer /me/ redirect chain — LinkedIn redirects authenticated
+      // /me/ to /in/<viewer-slug>/, so the final page.url() reveals the slug
+      // without DOM scraping. /feed/ scrape (3-layer) kept as enrichment
+      // attempt for fullName + headline; failure on enrichment doesn't fail
+      // the tool — slug from URL is sufficient.
+      const meResponse = await page.goto('https://www.linkedin.com/me/', {
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
+      });
+      const meStatus = meResponse?.status() ?? 0;
+      if (meStatus === 999) {
+        throw new AppError('CAPTCHA_DETECTED', 'LinkedIn 999 on /me for whoami', { status: meStatus });
+      }
+      const finalMeUrl = page.url();
+      if (
+        finalMeUrl.includes('/authwall') ||
+        finalMeUrl.includes('/uas/login') ||
+        finalMeUrl.includes('/checkpoint')
+      ) {
+        throw new AppError('COOKIE_EXPIRED', `Auth wall on /me for ${accountId}`, {
+          redirectedTo: finalMeUrl,
+        });
+      }
+      const slugFromUrl = finalMeUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
+
+      // Now on /in/<slug>/ — the profile page. Extract fullName + headline
+      // from public profile DOM (more reliable than /feed scrape).
+      const enriched = await page.evaluate((): { fullName: string; headline: string } => {
+        const titleEl = document.querySelector('h1.text-heading-xlarge, h1');
+        const fullName = (titleEl?.textContent ?? '').trim();
+        const headlineEl = document.querySelector('.text-body-medium, [data-test-id="hero-title"] + div');
+        const headline = (headlineEl?.textContent ?? '').trim();
+        return { fullName, headline };
+      });
+
+      if (slugFromUrl) {
+        await page.close();
+        logger.info({ accountId, slug: slugFromUrl, source: 'me-redirect' }, 'get_account_owner ok');
+        return {
+          accountId,
+          slug: slugFromUrl,
+          profileUrl: `https://www.linkedin.com/in/${slugFromUrl}/`,
+          fullName: enriched.fullName,
+          headline: enriched.headline,
+          source: 'me-redirect',
+        };
+      }
+
+      // Fallback — /me did not redirect to /in/<slug>. Try the legacy /feed
+      // 3-layer DOM scrape.
+      logger.warn({ accountId, finalMeUrl }, '/me did not yield slug, falling back to /feed scrape');
+      await page.goto('https://www.linkedin.com/feed/', {
         waitUntil: 'load',
         timeout: 60000,
       });
-      const status = response?.status() ?? 0;
-      if (status === 999) {
-        throw new AppError('CAPTCHA_DETECTED', 'LinkedIn 999 on /feed for whoami', { status });
-      }
-      const finalUrl = page.url();
-      if (
-        finalUrl.includes('/authwall') ||
-        finalUrl.includes('/uas/login') ||
-        finalUrl.includes('/checkpoint')
-      ) {
-        throw new AppError('COOKIE_EXPIRED', `Auth wall on /feed for ${accountId}`, {
-          redirectedTo: finalUrl,
-        });
-      }
 
       const owner = await page.evaluate((): OwnerScrape | null => {
         // Layer 1 — explicit meta tag (sometimes present).
@@ -155,7 +189,7 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
         throw new AppError(
           'SCRAPER_FAIL',
           'Could not extract owner identity from /feed DOM (LinkedIn layout may have changed)',
-          { accountId, finalUrl },
+          { accountId, finalMeUrl, feedUrl: page.url() },
         );
       }
 
