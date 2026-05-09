@@ -220,13 +220,17 @@ async function scrapeProfileViaApifyOnly(args: {
     `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(APIFY_PROFILE_ACTOR)}/run-sync-get-dataset-items` +
     `?token=${encodeURIComponent(apifyToken)}&format=json`;
 
-  // harvestapi accepts both `profileUrls` (preferred) and `profileScraperMode`
-  // = "Profile details" | "Profile details + email search". We pick the email
-  // mode by default (set APIFY_LINKEDIN_PROFILE_INCLUDE_EMAIL=false to opt out).
+  // harvestapi/linkedin-profile-scraper input schema (validated 2026-05-09):
+  //   queries: string[]                — LinkedIn URLs (NOT `profileUrls`)
+  //   profileScraperMode: enum         — exact strings:
+  //     "Profile details no email ($4 per 1k)"
+  //     "Profile details + email search ($10 per 1k)"
+  // Operator opt-out via APIFY_LINKEDIN_PROFILE_INCLUDE_EMAIL=false.
   const body = {
-    profileUrls: [profileUrl],
-    maxItems: 1,
-    profileScraperMode: APIFY_INCLUDE_EMAIL ? 'Profile details + email search ($10 per 1k)' : 'Profile details ($4 per 1k)',
+    queries: [profileUrl],
+    profileScraperMode: APIFY_INCLUDE_EMAIL
+      ? 'Profile details + email search ($10 per 1k)'
+      : 'Profile details no email ($4 per 1k)',
   };
 
   const res = await fetch(url, {
@@ -270,55 +274,64 @@ function mapApifyHarvestProfile(raw: Record<string, unknown>, profileUrl: string
   const get = <T>(key: string): T | undefined => raw[key] as T | undefined;
   const str = (v: unknown): string => (v == null ? '' : String(v));
 
+  // Experience entries from harvestapi have shape:
+  //   { position, companyName, companyLinkedinUrl, employmentType,
+  //     workplaceType, duration, description, location, ... }
   const exp = (get<unknown[]>('experience') ?? []) as Array<Record<string, unknown>>;
   const experience: ProfileExperience[] = exp.slice(0, 25).map((e) => ({
-    title: str(e['title'] ?? e['position']),
-    company: str((e['company'] as Record<string, unknown> | undefined)?.['name'] ?? e['companyName'] ?? e['company']),
-    startDate: str(e['startDate'] ?? e['start_date']),
-    endDate: e['endDate'] != null ? str(e['endDate']) : (e['end_date'] != null ? str(e['end_date']) : null),
+    title: str(e['position'] ?? e['title']),
+    company: str(e['companyName'] ?? e['company']),
+    startDate: str(e['startDate'] ?? e['duration']),
+    endDate: e['endDate'] != null ? str(e['endDate']) : null,
     location: str(e['location']),
     description: str(e['description']),
   }));
 
+  // Education entries: { schoolName, degree, fieldOfStudy, startDate, endDate }
   const edu = (get<unknown[]>('education') ?? []) as Array<Record<string, unknown>>;
   const education: ProfileEducation[] = edu.slice(0, 15).map((ed) => ({
-    school: str((ed['school'] as Record<string, unknown> | undefined)?.['name'] ?? ed['schoolName'] ?? ed['title'] ?? ed['school']),
+    school: str(ed['schoolName'] ?? ed['school'] ?? ed['title']),
     degree: ed['degree'] != null ? str(ed['degree']) : undefined,
-    field: ed['field'] != null ? str(ed['field']) : (ed['fieldOfStudy'] != null ? str(ed['fieldOfStudy']) : undefined),
-    startYear: parseYear(ed['startYear'] ?? ed['start_year'] ?? ed['startDate']),
-    endYear: ed['endYear'] != null ? parseYear(ed['endYear']) : (ed['end_year'] != null ? parseYear(ed['end_year']) : null),
+    field: ed['fieldOfStudy'] != null ? str(ed['fieldOfStudy']) : (ed['field'] != null ? str(ed['field']) : undefined),
+    startYear: parseYear(ed['startDate'] ?? ed['startYear']),
+    endYear: ed['endDate'] != null ? parseYear(ed['endDate']) : (ed['endYear'] != null ? parseYear(ed['endYear']) : null),
   }));
 
+  // Skills entries: { name: "SaaS", endorsements: "92 endorsements" }
   const skillsRaw = (get<unknown[]>('skills') ?? []) as Array<Record<string, unknown> | string>;
   const skills: string[] = skillsRaw
     .slice(0, 50)
     .map((s) => (typeof s === 'string' ? s : str((s as Record<string, unknown>)['name'] ?? (s as Record<string, unknown>)['title'])))
     .filter((s) => s.length > 0);
 
-  const emailFields = ['email', 'emails', 'workEmail', 'verifiedEmail'];
-  const emails: string[] = [];
-  for (const f of emailFields) {
-    const v = raw[f];
-    if (typeof v === 'string' && v.includes('@')) emails.push(v);
-    if (Array.isArray(v)) {
-      for (const e of v) {
-        if (typeof e === 'string' && e.includes('@')) emails.push(e);
-      }
-    }
-  }
+  // emails from harvestapi is `emails: string[]` directly.
+  const emailsRaw = get<unknown[]>('emails');
+  const emails: string[] = Array.isArray(emailsRaw)
+    ? emailsRaw.filter((e): e is string => typeof e === 'string' && e.includes('@'))
+    : [];
 
-  const currentPos = get<Record<string, unknown>>('currentPosition');
-  const currentCompany = currentPos
-    ? str(currentPos['companyName'] ?? (currentPos['company'] as Record<string, unknown> | undefined)?.['name'])
-    : experience[0]?.company ?? null;
-  const currentRole = currentPos ? str(currentPos['title']) : (experience[0]?.title ?? null);
+  // currentPosition is an ARRAY in harvestapi (multiple concurrent roles
+  // like board memberships). First entry = primary current role.
+  const currentPosArr = (get<unknown[]>('currentPosition') ?? []) as Array<Record<string, unknown>>;
+  const cp = currentPosArr[0];
+  const currentCompany = cp ? str(cp['companyName']) : (experience[0]?.company ?? '');
+  const currentRole = cp ? str(cp['position']) : (experience[0]?.title ?? '');
+
+  // location is an object: { linkedinText, countryCode, parsed: {...} }
+  const locObj = get<Record<string, unknown>>('location');
+  const location = locObj ? str(locObj['linkedinText']) : str(get('locationText'));
+
+  // fullName from firstName + lastName
+  const firstName = str(get('firstName'));
+  const lastName = str(get('lastName'));
+  const fullName = firstName || lastName ? `${firstName} ${lastName}`.trim() : str(get('name') ?? get('fullName'));
 
   return {
-    url: profileUrl,
-    publicId: slug,
-    fullName: str(get('name') ?? get('fullName')),
-    headline: str(get('headline') ?? get('position')),
-    location: str(get('location') ?? get('locationName') ?? get('city')),
+    url: str(get('linkedinUrl')) || profileUrl,
+    publicId: str(get('publicIdentifier')) || slug,
+    fullName,
+    headline: str(get('headline')),
+    location,
     currentCompany: currentCompany || null,
     currentRole: currentRole || null,
     summary: str(get('about') ?? get('summary') ?? get('bio')),
