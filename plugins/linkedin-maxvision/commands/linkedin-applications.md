@@ -1,59 +1,52 @@
 ---
 name: linkedin-applications
 description: Lista candidaturas registradas no tracker local
-argument-hint: [--status saved|applied|interviewing|rejected|offered|withdrawn]
-allowed-tools: []
+argument-hint: [--status saved|applied|interviewing|rejected|offered|withdrawn] [--limit N]
+allowed-tools: ["mcp__linkedin-maxvision__list_applications"]
 ---
 
-Você está ajudando o usuário a revisar todas as candidaturas registradas no tracker local.
+Você está ajudando o usuário a revisar candidaturas registradas no tracker local
+via o tool MCP `list_applications` (Sprint 1.5, v0.13.4+).
 
-# Status Sprint 1
+# Workflow
 
-> **Aviso ao usuário:** Este comando precisa do tool MCP `list_applications`, planejado para a **Sprint 1.5**. Na Free tier atual (Sprint 1) ele ainda não está exposto.
->
-> Enquanto isso, há duas opções:
+1. **Parse `$ARGUMENTS`** procurando os flags abaixo. Tudo é opcional:
+   - `--status <s>` → um de `saved | applied | interviewing | rejected | offered | withdrawn`.
+   - `--limit <N>` → inteiro 1-200; default 50.
+   - `--account <id>` → opcional; default `default` (resolve para a primeira conta ativa).
 
-## Opção A — Query SQL direta (recomendado)
+2. **Chame** `mcp__linkedin-maxvision__list_applications` com:
+   - `accountId` (opcional, default `default`)
+   - `status` (apenas se o flag veio)
+   - `limit` (apenas se o flag veio)
 
-Se o usuário tem acesso ao Postgres do `mcp-server`:
+3. **Renderize uma tabela markdown** com colunas:
+   `Status | Empresa | Cargo | Submetido em | Histórico`. Use `submittedAt`
+   formatado como `YYYY-MM-DD HH:mm` em pt_BR; mostre `—` quando `null`
+   (status `saved`, ainda não aplicado).
 
-```bash
-psql "$DATABASE_URL" -c "
-  SELECT
-    job_url,
-    job_title,
-    company,
-    status,
-    notes,
-    updated_at
-  FROM applications
-  WHERE account_id = 'default'
-  ORDER BY updated_at DESC
-  LIMIT 50;
-"
+4. **No rodapé**, mostre `Total: <count>` e (se filtro foi aplicado) `Filtro: status=<s>`.
+   Sugira variações úteis: filtrar por outro status, registrar nova via `/linkedin-track`,
+   ou expandir o limite.
+
+5. Se `count == 0`:
+   - Sem filtro → diga "Nenhuma candidatura registrada" e ofereça `/linkedin-track`.
+   - Com filtro → diga "Nenhuma candidatura com status=<s>"; sugira remover o filtro
+     ou rodar `/linkedin-applications` cru para ver tudo.
+
+# Exemplos de uso
+
 ```
-
-Para filtrar por status:
-```bash
-psql "$DATABASE_URL" -c "
-  SELECT job_url, status, updated_at
-  FROM applications
-  WHERE status = 'applied'
-  ORDER BY updated_at DESC;
-"
+/linkedin-applications                          # últimas 50, qualquer status
+/linkedin-applications --status applied         # só candidaturas enviadas
+/linkedin-applications --status saved --limit 200
+/linkedin-applications --account sandbox-2      # outra conta do pool
 ```
-
-## Opção B — Aguardar Sprint 1.5
-
-A próxima sprint adiciona `list_applications` como tool MCP. Avise o usuário para acompanhar o changelog em [linkedin.produtoramaxvision.com.br/changelog](https://linkedin.produtoramaxvision.com.br/changelog).
-
-# Workflow desta sessão
-
-1. Explique a limitação acima de forma direta (Sprint 1.5).
-2. Pergunte se ele quer a Opção A (rodar SQL) ou se prefere apenas registrar uma nova candidatura agora via `/linkedin-track`.
-3. **Não** tente chamar tool MCP inexistente — o `allowed-tools` desta command está vazio de propósito.
 
 # Constraints
 
-- Não invente um tool `list_applications`. Ele será adicionado na Sprint 1.5.
-- Se o usuário pedir SQL, ofereça apenas SELECTs read-only — nunca DELETE/UPDATE direto no DB pelo SQL.
+- **Não** invente filtros que o tool não suporta — apenas `accountId`, `status`, `limit`.
+- **Nunca** sugira SQL direto no Postgres como fallback; o tool MCP cobre o caso.
+- **Não** registre nova candidatura aqui; isso é trabalho do `/linkedin-track`.
+- Se o tool retornar `error.code: "RATE_LIMITED"`, peça desculpa e avise para
+  aguardar antes de retentar.

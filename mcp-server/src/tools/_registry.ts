@@ -29,6 +29,7 @@ import {
   FindCompanyEmployeesInputShape,
   GetProfileActivityInputShape,
   MonitorPostEngagementInputShape,
+  ListApplicationsInputShape,
 } from './schemas.js';
 import { searchJobs } from './search_jobs.js';
 import { getProfile } from './get_profile.js';
@@ -45,6 +46,7 @@ import { searchCompanies } from './search_companies.js';
 import { findCompanyEmployees } from './find_company_employees.js';
 import { getProfileActivity } from './get_profile_activity.js';
 import { monitorPostEngagement } from './monitor_post_engagement.js';
+import { listApplications } from './list_applications.js';
 
 export function registerAllTools(server: McpServer): void {
   // Sprint 1.
@@ -189,5 +191,17 @@ export function registerAllTools(server: McpServer): void {
       inputSchema: MonitorPostEngagementInputShape,
     },
     async (input: unknown) => monitorPostEngagement(input),
+  );
+
+  // Sprint 1.5 — local tracker reads (paired with track_application).
+  server.registerTool(
+    'list_applications',
+    {
+      title: 'List Applications',
+      description:
+        'List tracked job applications for an account (status filter optional, limit max 200). Local DB read.',
+      inputSchema: ListApplicationsInputShape,
+    },
+    async (input: unknown) => listApplications(input),
   );
 }

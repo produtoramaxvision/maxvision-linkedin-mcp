@@ -52,6 +52,24 @@ export async function findAll(accountId: string, limit = 200): Promise<Applicati
 }
 
 /**
+ * List applications filtered by status (Sprint 1.5).
+ * NULL submittedAt rows (status != 'applied') sort last via NULLS LAST so
+ * the most recent submitted-or-saved entries surface first.
+ */
+export async function findByStatus(
+  accountId: string,
+  status: string,
+  limit = 200,
+): Promise<Application[]> {
+  return db
+    .select()
+    .from(applications)
+    .where(and(eq(applications.accountId, accountId), eq(applications.status, status)))
+    .orderBy(desc(applications.submittedAt))
+    .limit(limit);
+}
+
+/**
  * Insert a fresh application row. Caller is expected to seed `history`
  * with the initial status entry (the schema default is `[]`).
  */

@@ -28,7 +28,8 @@ export type Action =
   | 'find_company_employees'
   | 'search_companies'
   | 'get_profile_activity'
-  | 'monitor_post_engagement';
+  | 'monitor_post_engagement'
+  | 'list_applications';
 
 const POLICY: Record<Action, { capacity: number; refillRate: number }> = {
   search_jobs: { capacity: 10, refillRate: 0.1 },        // 10 burst, ~6/min sustained
@@ -47,6 +48,7 @@ const POLICY: Record<Action, { capacity: number; refillRate: number }> = {
   search_companies: { capacity: 10, refillRate: 0.1 },
   get_profile_activity: { capacity: 10, refillRate: 0.1 },
   monitor_post_engagement: { capacity: 10, refillRate: 0.1 },
+  list_applications: { capacity: 100, refillRate: 1 },   // local DB read, lenient
 };
 
 export async function checkRateLimit(
