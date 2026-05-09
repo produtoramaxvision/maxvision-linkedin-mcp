@@ -93,17 +93,29 @@ async function searchPeopleViaApify(args: {
   const items = (await res.json()) as Array<Record<string, unknown>>;
   return items.slice(0, input.maxResults).map((it) => {
     const profileUrl = String(it['linkedinUrl'] ?? it['profileUrl'] ?? it['url'] ?? '');
+    const firstName = it['firstName'] != null ? String(it['firstName']) : '';
+    const lastName = it['lastName'] != null ? String(it['lastName']) : '';
+    const name = firstName || lastName
+      ? `${firstName} ${lastName}`.trim()
+      : String(it['name'] ?? it['fullName'] ?? '').trim();
+    const cp = (it['currentPositions'] as Array<Record<string, unknown>> | undefined)?.[0];
+    const headline = cp
+      ? String(cp['position'] ?? cp['title'] ?? '')
+      : String(it['headline'] ?? it['position'] ?? '');
+    const locObj = it['location'] as Record<string, unknown> | undefined;
+    const location = locObj
+      ? String(locObj['linkedinText'] ?? locObj['city'] ?? '')
+      : String(it['location'] ?? it['locationName'] ?? '');
+    const currentCompany = cp
+      ? String(cp['companyName'] ?? '')
+      : String((it['currentCompany'] as Record<string, unknown> | undefined)?.['name'] ?? it['companyName'] ?? '');
     return {
       url: profileUrl,
       publicId: extractPublicIdFromUrl(profileUrl),
-      name: String(it['name'] ?? it['fullName'] ?? `${it['firstName'] ?? ''} ${it['lastName'] ?? ''}`).trim(),
-      headline: String(it['headline'] ?? it['position'] ?? ''),
-      location: String(it['location'] ?? it['locationName'] ?? ''),
-      currentCompany: String(
-        (it['currentCompany'] as Record<string, unknown> | undefined)?.['name']
-          ?? it['companyName']
-          ?? '',
-      ),
+      name,
+      headline,
+      location,
+      currentCompany,
     };
   }).filter((p) => p.url.length > 0);
 }

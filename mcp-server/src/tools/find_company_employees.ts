@@ -49,14 +49,24 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
 
     const str = (v: unknown): string => (v == null ? '' : String(v));
     const employees: EmployeeResult[] = items.slice(0, input.maxResults).map((e) => {
-      const url = str(e['url'] ?? e['linkedinUrl'] ?? e['profileUrl']);
+      const url = str(e['linkedinUrl'] ?? e['url'] ?? e['profileUrl']);
       const slugMatch = url.match(/\/in\/([^/?#]+)/);
+      // linkedin-profile-search Short returns firstName + lastName (not `name`)
+      const firstName = str(e['firstName']);
+      const lastName = str(e['lastName']);
+      const name = firstName || lastName ? `${firstName} ${lastName}`.trim() : str(e['name'] ?? e['fullName']);
+      // currentPositions is array; take first.position as title
+      const cp = (e['currentPositions'] as Array<Record<string, unknown>> | undefined)?.[0];
+      const title = cp ? str(cp['position'] ?? cp['title']) : str(e['headline'] ?? e['title'] ?? e['position']);
+      // location is {linkedinText, countryCode, parsed}
+      const locObj = e['location'] as Record<string, unknown> | undefined;
+      const location = locObj ? str(locObj['linkedinText']) : str(e['location']);
       return {
         url,
         publicId: (slugMatch?.[1] ?? '').toLowerCase(),
-        name: str(e['name'] ?? e['fullName']),
-        title: str(e['title'] ?? e['headline'] ?? e['position']),
-        location: str(e['location']),
+        name,
+        title,
+        location,
       };
     }).filter((p) => p.url.length > 0);
 
