@@ -40,10 +40,11 @@ export const getCompanyInfo = withInstrumentation<GetCompanyInfoInput, GetCompan
   handler: async ({ input, accountId }) => {
     logger.info({ accountId, companyUrl: input.companyUrl }, 'get_company_info start');
 
+    // harvestapi~linkedin-company input field is `companies` (array of URLs).
     const items = await runApifyActor({
       actor: ACTOR,
       context: 'get_company_info',
-      input: { companyUrls: [input.companyUrl], maxItems: 1 },
+      input: { companies: [input.companyUrl] },
     });
     const r = items[0];
     if (!r) {
@@ -51,17 +52,39 @@ export const getCompanyInfo = withInstrumentation<GetCompanyInfoInput, GetCompan
     }
 
     const str = (v: unknown): string => (v == null ? '' : String(v));
+    // Locations is array; pick the headquarter entry, fall back to first.
+    const locations = (r['locations'] as Array<Record<string, unknown>> | undefined) ?? [];
+    const hq = locations.find((l) => l['headquarter'] === true) ?? locations[0];
+    const hqText = hq
+      ? (typeof hq['parsed'] === 'object' && hq['parsed'] != null
+          ? str((hq['parsed'] as Record<string, unknown>)['text'])
+          : `${str(hq['city'])} ${str(hq['country'])}`.trim())
+      : '';
+    // foundedOn is {month, year, day} object
+    const foundedRaw = r['foundedOn'];
+    const founded = foundedRaw && typeof foundedRaw === 'object'
+      ? str((foundedRaw as Record<string, unknown>)['year'])
+      : str(r['founded'] ?? r['foundedYear']);
+    // employeeCountRange is {start, end} object — derive size string
+    const ecr = r['employeeCountRange'] as Record<string, unknown> | undefined;
+    const companySize = ecr ? `${str(ecr['start'])}-${str(ecr['end'])}` : str(r['companySize']);
+    // industries array; flatten to comma-separated string
+    const industries = (r['industries'] as Array<Record<string, unknown> | string> | undefined) ?? [];
+    const industry = industries.length > 0
+      ? industries.map((i) => typeof i === 'string' ? i : str((i as Record<string, unknown>)['name'])).join(', ')
+      : str(r['industry']);
+
     const company: CompanyInfo = {
-      url: str(r['url'] ?? input.companyUrl),
-      name: str(r['name'] ?? r['companyName']),
-      description: str(r['description'] ?? r['about']),
-      industry: str(r['industry']),
-      companySize: str(r['companySize'] ?? r['size']),
-      headquarters: str(r['headquarters'] ?? r['hq']),
-      founded: str(r['founded'] ?? r['foundedYear']),
+      url: str(r['linkedinUrl'] ?? input.companyUrl),
+      name: str(r['name']),
+      description: str(r['description'] ?? r['tagline']),
+      industry,
+      companySize,
+      headquarters: hqText,
+      founded,
       website: str(r['website']),
-      followers: typeof r['followers'] === 'number' ? r['followers'] : 0,
-      employeeCount: typeof r['employeeCount'] === 'number' ? r['employeeCount'] : (typeof r['employees'] === 'number' ? r['employees'] as number : 0),
+      followers: typeof r['followerCount'] === 'number' ? (r['followerCount'] as number) : 0,
+      employeeCount: typeof r['employeeCount'] === 'number' ? (r['employeeCount'] as number) : 0,
       specialties: Array.isArray(r['specialties']) ? (r['specialties'] as unknown[]).map((s) => str(s)) : [],
       raw: r,
     };
