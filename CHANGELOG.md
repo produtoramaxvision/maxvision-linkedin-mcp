@@ -6,6 +6,22 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.6 — get_account_owner /feed nav + search_people async path)
+
+- **get_account_owner /feed page.goto timeout**: 30s `domcontentloaded`
+  was insufficient — LinkedIn `/feed/` ships heavy hydrated state and
+  the embedded `<code id="bpr-guid-*">` JSON blobs only land after `load`.
+  Bumped to 60s timeout + `waitUntil: 'load'` so the JSON-LD layer of
+  the 3-layer extraction has data to parse.
+- **search_people not using v0.13.5 async Apify path**: the tool had its
+  own inline `searchPeopleViaApify` that hit `run-sync-get-dataset-items`
+  directly, bypassing the new `runApifyActor` helper and its
+  free-tier-throttle detection. v0.13.6 routes through `runApifyActor`
+  so "free user run limit reached" surfaces as a clear `UPSTREAM_FAIL`
+  instead of `count:0`. Also removed the silent fall-through to the
+  broken HTML path when Apify errors — operators now see the actual
+  Apify failure.
+
 ### Added (v0.13.5 — get_account_owner + i18n easyApply + Apify free-limit)
 
 - **New MCP tool `get_account_owner`** (17th tool). Patchright-based whoami

@@ -24,8 +24,8 @@
 import { withInstrumentation } from './_base.js';
 import { SearchPeopleInputSchema, type SearchPeopleInput } from './schemas.js';
 import { fetchAndParse } from '../browser/fetch-and-parse.js';
+import { runApifyActor } from '../scrapers/apify-helper.js';
 import { logger } from '../logger.js';
-import { AppError } from '../errors.js';
 
 interface PersonResult {
   url: string;
@@ -52,7 +52,6 @@ function selectActor(mode: 'keywords' | 'by-name' | 'keywords-search'): string {
     default: return ACTOR_KEYWORDS;
   }
 }
-const APIFY_RUN_ENDPOINT = 'https://api.apify.com/v2/acts';
 
 function extractPublicIdFromUrl(url: string): string {
   const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
@@ -61,13 +60,8 @@ function extractPublicIdFromUrl(url: string): string {
 
 async function searchPeopleViaApify(args: {
   input: SearchPeopleInput;
-  apifyToken: string;
 }): Promise<PersonResult[]> {
-  const { input, apifyToken } = args;
-  const url =
-    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(selectActor(input.mode))}/run-sync-get-dataset-items` +
-    `?token=${encodeURIComponent(apifyToken)}&format=json`;
-
+  const { input } = args;
   // harvestapi profile-search input field is `searchQuery` (NOT keywords/searches).
   const body: Record<string, unknown> = {
     searchQuery: input.keywords,
@@ -77,21 +71,14 @@ async function searchPeopleViaApify(args: {
   if (input.company) body['currentCompanies'] = [input.company];
   if (input.location) body['locations'] = [input.location];
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(body),
+  // v0.13.6: switch to runApifyActor (async + statusMessage detection) so
+  // FREE-tier silent throttling surfaces as a clear UPSTREAM_FAIL with
+  // upgrade hint, instead of returning [] silently.
+  const items = await runApifyActor({
+    actor: selectActor(input.mode),
+    context: 'search_people',
+    input: body,
   });
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new AppError(
-      'EXTERNAL_API_FAIL',
-      `Apify ${res.status} (${selectActor(input.mode)}): ${errBody.slice(0, 300)}`,
-      { status: res.status, actor: selectActor(input.mode) },
-    );
-  }
-
-  const items = (await res.json()) as Array<Record<string, unknown>>;
   return items.slice(0, input.maxResults).map((it) => {
     const profileUrl = String(it['linkedinUrl'] ?? it['profileUrl'] ?? it['url'] ?? '');
     const firstName = it['firstName'] != null ? String(it['firstName']) : '';
@@ -137,17 +124,14 @@ export const searchPeople = withInstrumentation<SearchPeopleInput, SearchPeopleO
 
     const apifyToken = process.env['APIFY_TOKEN'];
     if (apifyToken) {
-      try {
-        const people = await searchPeopleViaApify({ input, apifyToken });
-        logger.info({ accountId, count: people.length, backend: 'apify' }, 'search_people via Apify ok');
-        return { count: people.length, people };
-      } catch (err) {
-        logger.warn(
-          { accountId, err: err instanceof Error ? err.message : String(err) },
-          'Apify search_people failed — falling back to HTML scrape (likely 2026-broken)',
-        );
-        // fall through
-      }
+      // v0.13.6: when APIFY_TOKEN is set, Apify is the authoritative path.
+      // We surface its errors directly (free-tier throttle, quota, network)
+      // instead of swallowing them and falling back to the broken HTML scrape.
+      // Operators without an Apify subscription should unset APIFY_TOKEN to
+      // get the legacy HTML path (still likely broken on LinkedIn 2026).
+      const people = await searchPeopleViaApify({ input });
+      logger.info({ accountId, count: people.length, backend: 'apify' }, 'search_people via Apify ok');
+      return { count: people.length, people };
     }
 
     // Fallback path — almost certainly fails in 2026 because LinkedIn
