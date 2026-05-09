@@ -119,8 +119,18 @@ export async function searchLinkedInJobs(args: {
         ).trim();
         const postedEl = card.querySelector('time, .job-search-card__listdate');
         const postedAt = postedEl?.getAttribute('datetime') || new Date().toISOString();
+        // PT-BR: "Candidatura simplificada" / ES: "Solicitud sencilla" /
+        // FR: "Candidature simplifiée" / DE: "Einfach bewerben" /
+        // IT: "Candidatura facile" — i18n labels per locale (Sprint 1.5 fix).
         const easyApplyMark = !!card.querySelector(
-          '[aria-label*="Easy Apply"i], li-icon[type="easy-apply"]',
+          '[aria-label*="Easy Apply"i], ' +
+            '[aria-label*="Candidatura simplificada"i], ' +
+            '[aria-label*="Candidatura facile"i], ' +
+            '[aria-label*="Solicitud sencilla"i], ' +
+            '[aria-label*="Candidature simplifi"i], ' +
+            '[aria-label*="Einfach bewerben"i], ' +
+            'li-icon[type="easy-apply"], ' +
+            'svg[data-test-icon="linkedin-bug-color-small"]',
         );
         out.push({
           url: href,
