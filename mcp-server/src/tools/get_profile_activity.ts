@@ -61,7 +61,7 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
         ? runApifyActor({
             actor: POSTS_ACTOR,
             context: 'get_profile_activity:posts',
-            input: { profileUrls: [input.profileUrl], maxItems: input.maxResults },
+            input: { targetUrls: [input.profileUrl], maxItems: input.maxResults },
           }).catch((err) => {
             logger.warn({ accountId, err: err instanceof Error ? err.message : String(err) }, 'profile-posts fetch failed');
             return [] as Array<Record<string, unknown>>;
@@ -71,7 +71,7 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
         ? runApifyActor({
             actor: REACTIONS_ACTOR,
             context: 'get_profile_activity:reactions',
-            input: { profileUrls: [input.profileUrl], maxItems: input.maxResults },
+            input: { profiles: [input.profileUrl], maxItems: input.maxResults },
           }).catch((err) => {
             logger.warn({ accountId, err: err instanceof Error ? err.message : String(err) }, 'profile-reactions fetch failed');
             return [] as Array<Record<string, unknown>>;
@@ -79,19 +79,21 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
         : Promise.resolve([] as Array<Record<string, unknown>>),
     ]);
 
+    // profile-posts shape: { id, linkedinUrl, content, type, ... }
     const posts: ActivityItem[] = postsRaw.slice(0, input.maxResults).map((p) => ({
-      url: str(p['url'] ?? p['postUrl'] ?? p['link']),
+      url: str(p['linkedinUrl'] ?? p['url'] ?? p['postUrl']),
       type: 'post' as const,
-      text: str(p['text'] ?? p['content'] ?? p['body']).slice(0, 1500),
+      text: str(p['content'] ?? p['text'] ?? p['body']).slice(0, 1500),
       postedAt: dateStr(p['postedAt'] ?? p['date'] ?? p['createdAt']),
       engagementCount: num(p['likes'] ?? p['numLikes'] ?? p['reactions']),
     }));
 
+    // profile-reactions shape: { id, linkedinUrl, action, createdAt, ... }
     const reactions: ActivityItem[] = reactionsRaw.slice(0, input.maxResults).map((r) => ({
-      url: str(r['url'] ?? r['postUrl'] ?? r['link']),
+      url: str(r['linkedinUrl'] ?? r['url'] ?? r['postUrl']),
       type: 'reaction' as const,
-      text: str(r['text'] ?? r['postText'] ?? r['snippet']).slice(0, 800),
-      postedAt: dateStr(r['reactedAt'] ?? r['date']),
+      text: str(r['action'] ?? r['text'] ?? r['postText'] ?? r['snippet']).slice(0, 800),
+      postedAt: dateStr(r['createdAt'] ?? r['reactedAt'] ?? r['date']),
       engagementCount: num(r['likes'] ?? r['numLikes']),
     }));
 

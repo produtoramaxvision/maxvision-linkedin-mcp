@@ -68,8 +68,9 @@ async function searchPeopleViaApify(args: {
     `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(selectActor(input.mode))}/run-sync-get-dataset-items` +
     `?token=${encodeURIComponent(apifyToken)}&format=json`;
 
+  // harvestapi profile-search input field is `searchQuery` (NOT keywords/searches).
   const body: Record<string, unknown> = {
-    keywords: input.keywords,
+    searchQuery: input.keywords,
     maxItems: input.maxResults,
     profileScraperMode: 'Short',
   };

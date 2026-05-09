@@ -37,12 +37,13 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
 
     // linkedin-profile-search input: currentCompanies (URL array) + optional
     // jobTitle keyword and location filter.
+    // linkedin-profile-search input: searchQuery + currentCompanies + locations.
     const apifyInput: Record<string, unknown> = {
       currentCompanies: [input.companyUrl],
       maxItems: input.maxResults,
       profileScraperMode: 'Short',
     };
-    if (input.jobTitle) apifyInput['keywords'] = input.jobTitle;
+    if (input.jobTitle) apifyInput['searchQuery'] = input.jobTitle;
     if (input.location) apifyInput['locations'] = [input.location];
 
     const items = await runApifyActor({ actor: ACTOR, context: 'find_company_employees', input: apifyInput });

@@ -66,7 +66,7 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
         ? runApifyActor({
             actor: REACTIONS_ACTOR,
             context: 'monitor_post_engagement:reactions',
-            input: { postUrls: [input.postUrl], maxItems: input.maxReactions },
+            input: { posts: [input.postUrl], maxItems: input.maxReactions },
           }).catch((err) => {
             logger.warn({ accountId, err: err instanceof Error ? err.message : String(err) }, 'post-reactions fetch failed');
             return [] as Array<Record<string, unknown>>;
@@ -76,7 +76,7 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
         ? runApifyActor({
             actor: COMMENTS_ACTOR,
             context: 'monitor_post_engagement:comments',
-            input: { postUrls: [input.postUrl], maxItems: input.maxComments },
+            input: { posts: [input.postUrl], maxItems: input.maxComments },
           }).catch((err) => {
             logger.warn({ accountId, err: err instanceof Error ? err.message : String(err) }, 'post-comments fetch failed');
             return [] as Array<Record<string, unknown>>;
