@@ -6,6 +6,37 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Added (v0.13.5 — get_account_owner + i18n easyApply + Apify free-limit)
+
+- **New MCP tool `get_account_owner`** (17th tool). Patchright-based whoami
+  for hydrated cookies — navigates `/feed/`, extracts viewer slug + name +
+  headline via 3-layer DOM scrape (meta tag → embedded JSON-LD blobs →
+  rail-nav avatar). Returns `{accountId, slug, profileUrl, fullName,
+  headline, source}`. Pairs with `/linkedin-cookie-refresh` so operators
+  can confirm WHICH LinkedIn account a sandbox entry is wired to without
+  exposing raw cookies.
+- Rate-limit policy `get_account_owner: {capacity:5, refillRate:0.05}` —
+  strict, since each call drives a real Patchright nav.
+
+### Fixed (v0.13.5)
+
+- **BUG C: `search_jobs` `easyApply:false` always**. DOM selector in
+  `linkedin-jobs.ts` matched only English `aria-label*="Easy Apply"`,
+  silently missing every locale where LinkedIn renders the localized label.
+  v0.13.5 selector now matches PT-BR ("Candidatura simplificada"), ES
+  ("Solicitud sencilla"), FR ("Candidature simplifiée"), IT ("Candidatura
+  facile"), DE ("Einfach bewerben"), plus the English original and the
+  legacy `li-icon[type="easy-apply"]` fallback.
+- **BUG D: `search_people` returns `[]` silently**. Apify FREE-tier runs
+  finish `SUCCEEDED` with empty datasets and `statusMessage="free user
+  run limit reached"`. The old `run-sync-get-dataset-items` path swallowed
+  this signal entirely. v0.13.5 rewrites `apify-helper.ts` to use the
+  async `/runs` flow + poll, then inspects `statusMessage` against a
+  pattern set (`free user run limit`, `usage limit`, `quota exceeded`,
+  `not enough credit`, `maxTotalChargeUsd`) and throws a distinct
+  `UPSTREAM_FAIL` with an upgrade hint when matched. Legacy sync wrapper
+  preserved as `runApifyActorSync` for callers that want the old behavior.
+
 ### Added (v0.13.4 — list_applications tool, Sprint 1.5 close-out)
 
 - **New MCP tool `list_applications`** (16th tool total). Local DB read paired

@@ -288,6 +288,16 @@ export const GetProfileActivityInputSchema = z.object(GetProfileActivityInputSha
 export type GetProfileActivityInput = z.infer<typeof GetProfileActivityInputSchema>;
 
 // ----------------------------------------------------------------------------
+// Sprint 1.5 — get_account_owner (whoami via Patchright + /feed/).
+// ----------------------------------------------------------------------------
+
+export const GetAccountOwnerInputShape = {
+  accountId: AccountIdSchema,
+};
+export const GetAccountOwnerInputSchema = z.object(GetAccountOwnerInputShape);
+export type GetAccountOwnerInput = z.infer<typeof GetAccountOwnerInputSchema>;
+
+// ----------------------------------------------------------------------------
 // Sprint 1.5 — list_applications (local DB read).
 // ----------------------------------------------------------------------------
 
