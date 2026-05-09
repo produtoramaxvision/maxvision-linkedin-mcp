@@ -6,6 +6,29 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Removed (v0.13.10 — get_account_owner tool dropped)
+
+After 4 implementation attempts (v0.13.5-9), `get_account_owner` is REMOVED.
+Empirical findings:
+- Apify `harvestapi/linkedin-profile-scraper` (and siblings) do NOT accept
+  user `li_at` / session cookies — confirmed via input-schema docs ("No
+  cookies or account required"). Actor uses internal session pool.
+- LinkedIn voyager API endpoints (`/voyager/api/me`,
+  `/voyager/api/identity/dash/profiles`, `/voyager/api/identity/profileView/me`)
+  return HTML or 404/999 from datacenter ASN in 2026, even with valid
+  csrf-token + JSESSIONID + li_at sent. Endpoint contract drift on
+  LinkedIn's side; not fixable from our code.
+- /me + /feed HTML scraping via Patchright is unreliable (timeouts,
+  interstitial pages, layout drift).
+
+Workaround: account owner identification is the responsibility of the
+`/linkedin-cookie-refresh` capture flow. Operators set the LinkedIn user
+name in `accounts.display_name` during cookie capture. Query via:
+
+  SELECT id, display_name FROM accounts;
+
+Total tools count: 16 (no whoami).
+
 ### Fixed (v0.13.9 — get_account_owner via voyager API)
 
 - **/me + /feed HTML scrape both unreliable from datacenter IPs**: empirical

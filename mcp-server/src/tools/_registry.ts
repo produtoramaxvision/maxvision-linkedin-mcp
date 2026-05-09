@@ -30,7 +30,6 @@ import {
   GetProfileActivityInputShape,
   MonitorPostEngagementInputShape,
   ListApplicationsInputShape,
-  GetAccountOwnerInputShape,
 } from './schemas.js';
 import { searchJobs } from './search_jobs.js';
 import { getProfile } from './get_profile.js';
@@ -48,7 +47,6 @@ import { findCompanyEmployees } from './find_company_employees.js';
 import { getProfileActivity } from './get_profile_activity.js';
 import { monitorPostEngagement } from './monitor_post_engagement.js';
 import { listApplications } from './list_applications.js';
-import { getAccountOwner } from './get_account_owner.js';
 
 export function registerAllTools(server: McpServer): void {
   // Sprint 1.
@@ -207,15 +205,11 @@ export function registerAllTools(server: McpServer): void {
     async (input: unknown) => listApplications(input),
   );
 
-  // Sprint 1.5 — whoami for hydrated cookies.
-  server.registerTool(
-    'get_account_owner',
-    {
-      title: 'Get Account Owner',
-      description:
-        'Identify the LinkedIn user whose cookies are stored in a given account pool entry. Patchright + /feed/ scrape.',
-      inputSchema: GetAccountOwnerInputShape,
-    },
-    async (input: unknown) => getAccountOwner(input),
-  );
+  // Sprint 1.5 — get_account_owner removed in v0.13.10.
+  // Reason: Apify harvestapi actors do NOT accept user li_at cookies (they
+  // use their own session pool — confirmed via input-schema docs); voyager
+  // /api/me + dash/profiles return HTML (not JSON) from datacenter IPs in
+  // 2026 — endpoint contract drift on LinkedIn side. Operators identify
+  // account owners via `accounts.display_name` set during
+  // /linkedin-cookie-refresh capture flow.
 }
