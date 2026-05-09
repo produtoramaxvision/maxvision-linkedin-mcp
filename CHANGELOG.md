@@ -6,6 +6,29 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Improved (v0.13.11 — optimize_profile smart pipeline Tavily → Apify)
+
+- **Problem**: optimize_profile with profileUrl + Tavily silently returned
+  garbage analysis for low-visibility profiles (LinkedIn renders multilingual
+  404 page for profiles < ~50 connections to anonymous traffic). LLM
+  analyzed the 404 text and produced generic AI Engineer template instead
+  of the real user's profile.
+- **Solution (Option B smart pipeline)**:
+  1. Manual `profileText` (fastest, free) — kept
+  2. `profileUrl` + Tavily → check `isLinkedInAntiScrapePage()` against
+     EN/PT/ES/AR/CS/DA i18n 404 markers → if 404, fall through
+  3. `profileUrl` + Apify get_profile (`scrapeProfile()`) → builds text
+     from structured `ProfileData` (fullName, headline, summary,
+     experience, education, skills) — works for ANY profile via Apify
+     authenticated pool
+  4. VALIDATION_FAIL only if all paths exhausted
+- New helper `isLinkedInAntiScrapePage()` detects LinkedIn anti-scrape
+  page in extracted content.
+- New helper `profileDataToText()` renders Apify ProfileData as LLM-ready
+  plain text.
+- Logger field `textSource: 'manual' | 'tavily' | 'apify'` for ops
+  visibility on which path resolved each call.
+
 ### Removed (v0.13.10 — get_account_owner tool dropped)
 
 After 4 implementation attempts (v0.13.5-9), `get_account_owner` is REMOVED.
