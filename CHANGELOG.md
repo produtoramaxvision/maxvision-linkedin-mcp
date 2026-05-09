@@ -6,6 +6,19 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.7 — get_account_owner /me redirect strategy)
+
+- **/feed/ DOM scrape returned null** consistently — LinkedIn ships /feed
+  with hydrated state injected post-load via JS, and the embedded
+  `<code id="bpr-guid-*">` JSON blobs that hold viewer identity are not
+  stable selectors. v0.13.7 switches the primary path to `/me/` →
+  LinkedIn redirects authenticated `/me/` to `/in/<viewer-slug>/`. The
+  final `page.url()` reveals the slug without DOM parsing — robust to
+  layout changes. Profile DOM is then scraped for fullName + headline as
+  enrichment (failure here doesn't fail the tool — slug is sufficient).
+  Source field gains `'me-redirect'` value. Legacy /feed 3-layer scrape
+  retained as fallback when /me doesn't yield a slug.
+
 ### Fixed (v0.13.6 — get_account_owner /feed nav + search_people async path)
 
 - **get_account_owner /feed page.goto timeout**: 30s `domcontentloaded`
