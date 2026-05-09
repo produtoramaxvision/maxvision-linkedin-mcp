@@ -85,19 +85,44 @@ export const listFeed = withInstrumentation<ListFeedInput, ListFeedOutput>({
         );
       }
       try {
+        // harvestapi/linkedin-post-search schema (validated 2026-05-09):
+        //   searchQueries: string[]   (NOT keywords)
+        //   maxPosts:      integer    (NOT maxItems)
+        //   sortBy:        "relevance" | "date"  (NOT "date_posted")
+        const fallbackQuery = process.env['LIST_FEED_APIFY_QUERY'] ?? 'linkedin';
         const apifyItems = await runApifyActor({
           actor: APIFY_POST_SEARCH_ACTOR,
           context: 'list_feed:apify-fallback',
-          input: { keywords: 'linkedin', maxItems: input.maxResults, sortBy: 'date_posted' },
+          input: {
+            searchQueries: [fallbackQuery],
+            maxPosts: input.maxResults,
+            sortBy: 'date',
+            profileScraperMode: 'short',
+          },
         });
         const str = (v: unknown): string => (v == null ? '' : String(v));
-        items = apifyItems.slice(0, input.maxResults).map((p) => ({
-          url: str(p['url'] ?? p['postUrl']),
-          authorName: str(p['authorName'] ?? (p['author'] as Record<string, unknown> | undefined)?.['name']),
-          authorHeadline: str(p['authorHeadline'] ?? (p['author'] as Record<string, unknown> | undefined)?.['headline']),
-          text: str(p['text'] ?? p['content']).slice(0, 1500),
-          postedAt: str(p['postedAt'] ?? p['date']),
-        }));
+        const dateStr = (v: unknown): string => {
+          if (v == null) return '';
+          if (typeof v === 'string') return v;
+          if (typeof v === 'object') {
+            const o = v as Record<string, unknown>;
+            if (typeof o['date'] === 'string') return o['date'];
+            if (typeof o['text'] === 'string') return o['text'];
+          }
+          return String(v);
+        };
+        // post-search shape: { id, linkedinUrl, content, author: {name, info, type},
+        //                      postedAt: {date, timestamp, postedAgoShort} }
+        items = apifyItems.slice(0, input.maxResults).map((p) => {
+          const a = (p['author'] as Record<string, unknown> | undefined) ?? {};
+          return {
+            url: str(p['linkedinUrl'] ?? p['url'] ?? p['postUrl']),
+            authorName: str(a['name'] ?? p['authorName']),
+            authorHeadline: str(a['info'] ?? a['headline'] ?? p['authorHeadline']),
+            text: str(p['content'] ?? p['text']).slice(0, 1500),
+            postedAt: dateStr(p['postedAt'] ?? p['date']),
+          };
+        }).filter((it) => it.url.length > 0 || it.text.length > 0);
         logger.info({ accountId, count: items.length }, 'list_feed via Apify post-search fallback ok');
       } catch (err) {
         throw new AppError(

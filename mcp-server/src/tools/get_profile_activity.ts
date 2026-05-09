@@ -45,7 +45,10 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
       if (typeof v === 'string') return v;
       if (typeof v === 'object') {
         const o = v as Record<string, unknown>;
+        // post-search style: { date: ISO, timestamp: number, postedAgoShort: string }
+        if (typeof o['date'] === 'string') return o['date'];
         if (typeof o['text'] === 'string') return o['text'];
+        // profile-detail style: { month: number, year: number }
         const m = o['month'] != null ? String(o['month']) : '';
         const y = o['year'] != null ? String(o['year']) : '';
         return [m, y].filter(Boolean).join(' ');

@@ -51,6 +51,7 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
       if (typeof v === 'string') return v;
       if (typeof v === 'object') {
         const o = v as Record<string, unknown>;
+        if (typeof o['date'] === 'string') return o['date'];
         if (typeof o['text'] === 'string') return o['text'];
         const m = o['month'] != null ? String(o['month']) : '';
         const y = o['year'] != null ? String(o['year']) : '';
