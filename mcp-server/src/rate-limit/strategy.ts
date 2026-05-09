@@ -23,7 +23,12 @@ export type Action =
   | 'optimize_profile'
   | 'list_feed'
   | 'post_update'
-  | 'search_people';
+  | 'search_people'
+  | 'get_company_info'
+  | 'find_company_employees'
+  | 'search_companies'
+  | 'get_profile_activity'
+  | 'monitor_post_engagement';
 
 const POLICY: Record<Action, { capacity: number; refillRate: number }> = {
   search_jobs: { capacity: 10, refillRate: 0.1 },        // 10 burst, ~6/min sustained
@@ -36,6 +41,12 @@ const POLICY: Record<Action, { capacity: number; refillRate: number }> = {
   list_feed: { capacity: 10, refillRate: 0.1 },          // read-only, moderate
   post_update: { capacity: 3, refillRate: 0.005 },       // very strict — public post
   search_people: { capacity: 5, refillRate: 0.05 },      // strict — Sales Nav surface
+  // Sprint 7 — Apify-backed read-only tools (no LinkedIn-side rate risk)
+  get_company_info: { capacity: 20, refillRate: 0.3 },
+  find_company_employees: { capacity: 10, refillRate: 0.1 },
+  search_companies: { capacity: 10, refillRate: 0.1 },
+  get_profile_activity: { capacity: 10, refillRate: 0.1 },
+  monitor_post_engagement: { capacity: 10, refillRate: 0.1 },
 };
 
 export async function checkRateLimit(

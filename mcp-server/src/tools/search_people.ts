@@ -41,7 +41,17 @@ export interface SearchPeopleOutput {
   people: PersonResult[];
 }
 
-const APIFY_PEOPLE_ACTOR = process.env['APIFY_LINKEDIN_PEOPLE_SEARCH_ACTOR'] ?? 'harvestapi~linkedin-profile-search';
+const ACTOR_KEYWORDS = process.env['APIFY_LINKEDIN_PEOPLE_SEARCH_ACTOR'] ?? 'harvestapi~linkedin-profile-search';
+const ACTOR_BY_NAME = process.env['APIFY_LINKEDIN_PEOPLE_SEARCH_BY_NAME_ACTOR'] ?? 'harvestapi~linkedin-profile-search-by-name';
+const ACTOR_KEYWORDS_SEARCH = process.env['APIFY_LINKEDIN_PEOPLE_KEYWORDS_SEARCH_ACTOR'] ?? 'harvestapi~linkedin-profile-keywords-search';
+
+function selectActor(mode: 'keywords' | 'by-name' | 'keywords-search'): string {
+  switch (mode) {
+    case 'by-name': return ACTOR_BY_NAME;
+    case 'keywords-search': return ACTOR_KEYWORDS_SEARCH;
+    default: return ACTOR_KEYWORDS;
+  }
+}
 const APIFY_RUN_ENDPOINT = 'https://api.apify.com/v2/acts';
 
 function extractPublicIdFromUrl(url: string): string {
@@ -55,7 +65,7 @@ async function searchPeopleViaApify(args: {
 }): Promise<PersonResult[]> {
   const { input, apifyToken } = args;
   const url =
-    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(APIFY_PEOPLE_ACTOR)}/run-sync-get-dataset-items` +
+    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(selectActor(input.mode))}/run-sync-get-dataset-items` +
     `?token=${encodeURIComponent(apifyToken)}&format=json`;
 
   const body: Record<string, unknown> = {
@@ -75,8 +85,8 @@ async function searchPeopleViaApify(args: {
     const errBody = await res.text();
     throw new AppError(
       'EXTERNAL_API_FAIL',
-      `Apify ${res.status} (${APIFY_PEOPLE_ACTOR}): ${errBody.slice(0, 300)}`,
-      { status: res.status, actor: APIFY_PEOPLE_ACTOR },
+      `Apify ${res.status} (${selectActor(input.mode)}): ${errBody.slice(0, 300)}`,
+      { status: res.status, actor: selectActor(input.mode) },
     );
   }
 

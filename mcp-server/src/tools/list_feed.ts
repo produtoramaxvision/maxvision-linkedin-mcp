@@ -25,8 +25,11 @@
 import { withInstrumentation } from './_base.js';
 import { ListFeedInputSchema, type ListFeedInput } from './schemas.js';
 import { fetchAndParse } from '../browser/fetch-and-parse.js';
+import { runApifyActor } from '../scrapers/apify-helper.js';
 import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
+
+const APIFY_POST_SEARCH_ACTOR = process.env['APIFY_LINKEDIN_POST_SEARCH_ACTOR'] ?? 'harvestapi~linkedin-post-search';
 
 interface FeedItem {
   url: string;
@@ -50,27 +53,59 @@ export const listFeed = withInstrumentation<ListFeedInput, ListFeedOutput>({
   handler: async ({ input, accountId }) => {
     logger.info({ accountId, max: input.maxResults }, 'list_feed start');
 
+    // Path A — try cookie-based DOM scrape of the personal /feed timeline.
+    // This is the only way to get a USER-SPECIFIC feed; Apify post-search
+    // returns trending posts by keyword, not the user's curated timeline.
     let items: FeedItem[] = [];
+    let cookieFailed = false;
     try {
       items = await runFeedScrape(accountId, input);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      // LinkedIn redirects unauthenticated requests to /uas/login → fetchAndParse
-      // surfaces this as ERR_HTTP_RESPONSE_CODE_FAILURE or COOKIE_EXPIRED.
-      // Tell the operator how to recover instead of bubbling raw browser errors.
-      if (
+      cookieFailed =
         msg.includes('ERR_HTTP_RESPONSE_CODE_FAILURE') ||
         msg.includes('uas/login') ||
         msg.includes('authwall') ||
-        msg.includes('COOKIE_EXPIRED')
-      ) {
+        msg.includes('COOKIE_EXPIRED');
+      if (!cookieFailed) throw err;
+      logger.warn({ accountId }, 'list_feed cookie path failed — falling back to Apify post-search');
+    }
+
+    // Path B fallback — when cookie path fails, fetch trending posts via Apify
+    // (different semantic: trending posts, not personal timeline). Operator
+    // can disable this path by setting LIST_FEED_APIFY_FALLBACK=false to get
+    // a hard COOKIE_EXPIRED error instead.
+    if (cookieFailed) {
+      const apifyFallback = process.env['LIST_FEED_APIFY_FALLBACK'] !== 'false';
+      if (!apifyFallback || !process.env['APIFY_TOKEN']) {
         throw new AppError(
           'COOKIE_EXPIRED',
-          `list_feed requires a freshly captured LinkedIn cookie for account "${accountId}". Run /linkedin-cookie-refresh and retry. (LinkedIn invalidated the existing session.)`,
+          `list_feed requires a freshly captured LinkedIn cookie for account "${accountId}". Run /linkedin-cookie-refresh and retry. (LinkedIn invalidated the existing session. Set LIST_FEED_APIFY_FALLBACK=true + APIFY_TOKEN to enable trending-post fallback.)`,
           { accountId },
         );
       }
-      throw err;
+      try {
+        const apifyItems = await runApifyActor({
+          actor: APIFY_POST_SEARCH_ACTOR,
+          context: 'list_feed:apify-fallback',
+          input: { keywords: 'linkedin', maxItems: input.maxResults, sortBy: 'date_posted' },
+        });
+        const str = (v: unknown): string => (v == null ? '' : String(v));
+        items = apifyItems.slice(0, input.maxResults).map((p) => ({
+          url: str(p['url'] ?? p['postUrl']),
+          authorName: str(p['authorName'] ?? (p['author'] as Record<string, unknown> | undefined)?.['name']),
+          authorHeadline: str(p['authorHeadline'] ?? (p['author'] as Record<string, unknown> | undefined)?.['headline']),
+          text: str(p['text'] ?? p['content']).slice(0, 1500),
+          postedAt: str(p['postedAt'] ?? p['date']),
+        }));
+        logger.info({ accountId, count: items.length }, 'list_feed via Apify post-search fallback ok');
+      } catch (err) {
+        throw new AppError(
+          'COOKIE_EXPIRED',
+          `list_feed cookie path AND Apify fallback failed. Refresh cookie via /linkedin-cookie-refresh. Apify error: ${err instanceof Error ? err.message : String(err)}`,
+          { accountId },
+        );
+      }
     }
     return { count: items.length, items };
   },

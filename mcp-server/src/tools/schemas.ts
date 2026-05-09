@@ -117,12 +117,23 @@ export const ListFeedInputSchema = z.object(ListFeedInputShape);
 export type ListFeedInput = z.infer<typeof ListFeedInputSchema>;
 
 // search_people — search /search/results/people.
+//
+// `mode` selects the Apify actor:
+//   - `keywords` (default) → harvestapi/linkedin-profile-search
+//   - `by-name`            → harvestapi/linkedin-profile-search-by-name
+//   - `keywords-search`    → harvestapi/linkedin-profile-keywords-search
+// All three accept `keywords` + filters; the actor differs on result ranking
+// strategy (semantic vs exact-name vs broad-keyword expansion).
 export const SearchPeopleInputShape = {
   accountId: AccountIdSchema,
   keywords: z.string().min(2).describe('Search keywords (e.g., "head of platform engineering BR")'),
   company: z.string().optional().describe('Filter by current company'),
   location: z.string().optional(),
   maxResults: z.number().int().positive().max(50).default(10),
+  mode: z
+    .enum(['keywords', 'by-name', 'keywords-search'])
+    .default('keywords')
+    .describe('Search strategy: keywords (default semantic), by-name (exact name match), keywords-search (broad expansion)'),
 };
 export const SearchPeopleInputSchema = z.object(SearchPeopleInputShape);
 export type SearchPeopleInput = z.infer<typeof SearchPeopleInputSchema>;
@@ -187,3 +198,78 @@ export const SendMessageInputShape = {
 };
 export const SendMessageInputSchema = z.object(SendMessageInputShape);
 export type SendMessageInput = z.infer<typeof SendMessageInputSchema>;
+
+// ----------------------------------------------------------------------------
+// Sprint 7 — Companies + activity tools (Apify-backed).
+// ----------------------------------------------------------------------------
+
+// get_company_info — fetch a single company by URL.
+export const GetCompanyInfoInputShape = {
+  accountId: AccountIdSchema,
+  companyUrl: z
+    .string()
+    .url()
+    .regex(/linkedin\.com\/company\//, 'Must be a LinkedIn /company/<slug> URL')
+    .describe('LinkedIn company URL (e.g., https://www.linkedin.com/company/notionhq/)'),
+};
+export const GetCompanyInfoInputSchema = z.object(GetCompanyInfoInputShape);
+export type GetCompanyInfoInput = z.infer<typeof GetCompanyInfoInputSchema>;
+
+// search_companies — search companies by keywords + filters.
+export const SearchCompaniesInputShape = {
+  accountId: AccountIdSchema,
+  keywords: z.string().min(2).describe('Search keywords (e.g., "fintech series B Brazil")'),
+  industry: z.string().optional().describe('Industry filter (e.g., "Software", "Banking")'),
+  location: z.string().optional().describe('Headquarters location (e.g., "São Paulo")'),
+  companySize: z
+    .enum(['1-10', '11-50', '51-200', '201-500', '501-1000', '1001-5000', '5001-10000', '10001+'])
+    .optional()
+    .describe('Employee headcount range'),
+  maxResults: z.number().int().positive().max(50).default(10),
+};
+export const SearchCompaniesInputSchema = z.object(SearchCompaniesInputShape);
+export type SearchCompaniesInput = z.infer<typeof SearchCompaniesInputSchema>;
+
+// find_company_employees — list employees of a company.
+export const FindCompanyEmployeesInputShape = {
+  accountId: AccountIdSchema,
+  companyUrl: z
+    .string()
+    .url()
+    .regex(/linkedin\.com\/company\//, 'Must be a LinkedIn /company/<slug> URL'),
+  jobTitle: z.string().optional().describe('Filter by job title (e.g., "engineering manager")'),
+  location: z.string().optional(),
+  maxResults: z.number().int().positive().max(100).default(25),
+};
+export const FindCompanyEmployeesInputSchema = z.object(FindCompanyEmployeesInputShape);
+export type FindCompanyEmployeesInput = z.infer<typeof FindCompanyEmployeesInputSchema>;
+
+// get_profile_activity — list a profile's recent posts + reactions.
+export const GetProfileActivityInputShape = {
+  accountId: AccountIdSchema,
+  profileUrl: ProfileUrlSchema,
+  include: z
+    .enum(['posts', 'reactions', 'both'])
+    .default('both')
+    .describe('Which activity streams to fetch'),
+  maxResults: z.number().int().positive().max(50).default(10),
+};
+export const GetProfileActivityInputSchema = z.object(GetProfileActivityInputShape);
+export type GetProfileActivityInput = z.infer<typeof GetProfileActivityInputSchema>;
+
+// monitor_post_engagement — fetch reactions + comments for a single post URL.
+export const MonitorPostEngagementInputShape = {
+  accountId: AccountIdSchema,
+  postUrl: z
+    .string()
+    .url()
+    .regex(/linkedin\.com\/(posts|feed\/update)/, 'Must be a LinkedIn post URL')
+    .describe('LinkedIn post URL (https://linkedin.com/posts/... or /feed/update/...)'),
+  include: z
+    .enum(['reactions', 'comments', 'both'])
+    .default('both'),
+  maxReactions: z.number().int().positive().max(500).default(50),
+  maxComments: z.number().int().positive().max(500).default(50),
+};
+export const MonitorPostEngagementInputSchema = z.object(MonitorPostEngagementInputShape);
+export type MonitorPostEngagementInput = z.infer<typeof MonitorPostEngagementInputSchema>;

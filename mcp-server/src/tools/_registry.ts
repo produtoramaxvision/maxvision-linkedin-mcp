@@ -24,6 +24,11 @@ import {
   PostUpdateInputShape,
   ApplyEasyInputShape,
   SendMessageInputShape,
+  GetCompanyInfoInputShape,
+  SearchCompaniesInputShape,
+  FindCompanyEmployeesInputShape,
+  GetProfileActivityInputShape,
+  MonitorPostEngagementInputShape,
 } from './schemas.js';
 import { searchJobs } from './search_jobs.js';
 import { getProfile } from './get_profile.js';
@@ -35,6 +40,11 @@ import { optimizeProfile } from './optimize_profile.js';
 import { postUpdate } from './post_update.js';
 import { applyEasy } from './apply_easy.js';
 import { sendMessage } from './send_message.js';
+import { getCompanyInfo } from './get_company_info.js';
+import { searchCompanies } from './search_companies.js';
+import { findCompanyEmployees } from './find_company_employees.js';
+import { getProfileActivity } from './get_profile_activity.js';
+import { monitorPostEngagement } from './monitor_post_engagement.js';
 
 export function registerAllTools(server: McpServer): void {
   // Sprint 1.
@@ -132,5 +142,52 @@ export function registerAllTools(server: McpServer): void {
       inputSchema: ApplyEasyInputShape,
     },
     async (input: unknown) => applyEasy(input),
+  );
+
+  // Sprint 7 — Apify-backed expansion (companies + activity).
+  server.registerTool(
+    'get_company_info',
+    {
+      title: 'Get Company Info',
+      description: 'Fetch detailed LinkedIn company info (size, industry, specialties, HQ).',
+      inputSchema: GetCompanyInfoInputShape,
+    },
+    async (input: unknown) => getCompanyInfo(input),
+  );
+  server.registerTool(
+    'search_companies',
+    {
+      title: 'Search Companies',
+      description: 'Search LinkedIn companies by keywords + filters (industry, location, size).',
+      inputSchema: SearchCompaniesInputShape,
+    },
+    async (input: unknown) => searchCompanies(input),
+  );
+  server.registerTool(
+    'find_company_employees',
+    {
+      title: 'Find Company Employees',
+      description: 'List employees of a LinkedIn company with optional title/location filters.',
+      inputSchema: FindCompanyEmployeesInputShape,
+    },
+    async (input: unknown) => findCompanyEmployees(input),
+  );
+  server.registerTool(
+    'get_profile_activity',
+    {
+      title: 'Get Profile Activity',
+      description: 'Fetch recent posts + reactions for a profile (warm-lead signals).',
+      inputSchema: GetProfileActivityInputShape,
+    },
+    async (input: unknown) => getProfileActivity(input),
+  );
+  server.registerTool(
+    'monitor_post_engagement',
+    {
+      title: 'Monitor Post Engagement',
+      description: 'Fetch reactions + comments for a LinkedIn post (engagement insights, lead enrichment).',
+      inputSchema: MonitorPostEngagementInputShape,
+    },
+    async (input: unknown) => monitorPostEngagement(input),
   );
 }
