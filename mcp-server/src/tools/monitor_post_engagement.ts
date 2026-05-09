@@ -46,6 +46,18 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
 
     const str = (v: unknown): string => (v == null ? '' : String(v));
     const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+    const dateStr = (v: unknown): string => {
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        if (typeof o['text'] === 'string') return o['text'];
+        const m = o['month'] != null ? String(o['month']) : '';
+        const y = o['year'] != null ? String(o['year']) : '';
+        return [m, y].filter(Boolean).join(' ');
+      }
+      return String(v);
+    };
     const wantR = input.include === 'reactions' || input.include === 'both';
     const wantC = input.include === 'comments' || input.include === 'both';
 
@@ -84,7 +96,7 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
       commenterUrl: str(c['commenterUrl'] ?? c['profileUrl'] ?? c['authorUrl']),
       commenterHeadline: str(c['commenterHeadline'] ?? c['headline']),
       text: str(c['text'] ?? c['content'] ?? c['comment']).slice(0, 1500),
-      postedAt: str(c['postedAt'] ?? c['date'] ?? c['createdAt']),
+      postedAt: dateStr(c['postedAt'] ?? c['date'] ?? c['createdAt']),
       likes: num(c['likes'] ?? c['numLikes']),
     }));
 

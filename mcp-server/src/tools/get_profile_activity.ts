@@ -40,6 +40,18 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
 
     const str = (v: unknown): string => (v == null ? '' : String(v));
     const num = (v: unknown): number => (typeof v === 'number' ? v : 0);
+    const dateStr = (v: unknown): string => {
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        if (typeof o['text'] === 'string') return o['text'];
+        const m = o['month'] != null ? String(o['month']) : '';
+        const y = o['year'] != null ? String(o['year']) : '';
+        return [m, y].filter(Boolean).join(' ');
+      }
+      return String(v);
+    };
 
     const wantPosts = input.include === 'posts' || input.include === 'both';
     const wantReactions = input.include === 'reactions' || input.include === 'both';
@@ -71,7 +83,7 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
       url: str(p['url'] ?? p['postUrl'] ?? p['link']),
       type: 'post' as const,
       text: str(p['text'] ?? p['content'] ?? p['body']).slice(0, 1500),
-      postedAt: str(p['postedAt'] ?? p['date'] ?? p['createdAt']),
+      postedAt: dateStr(p['postedAt'] ?? p['date'] ?? p['createdAt']),
       engagementCount: num(p['likes'] ?? p['numLikes'] ?? p['reactions']),
     }));
 
@@ -79,7 +91,7 @@ export const getProfileActivity = withInstrumentation<GetProfileActivityInput, G
       url: str(r['url'] ?? r['postUrl'] ?? r['link']),
       type: 'reaction' as const,
       text: str(r['text'] ?? r['postText'] ?? r['snippet']).slice(0, 800),
-      postedAt: str(r['reactedAt'] ?? r['date']),
+      postedAt: dateStr(r['reactedAt'] ?? r['date']),
       engagementCount: num(r['likes'] ?? r['numLikes']),
     }));
 

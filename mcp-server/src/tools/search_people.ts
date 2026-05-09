@@ -71,7 +71,7 @@ async function searchPeopleViaApify(args: {
   const body: Record<string, unknown> = {
     keywords: input.keywords,
     maxItems: input.maxResults,
-    profileScraperMode: 'short',
+    profileScraperMode: 'Short',
   };
   if (input.company) body['currentCompanies'] = [input.company];
   if (input.location) body['locations'] = [input.location];

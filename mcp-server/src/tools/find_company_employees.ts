@@ -40,7 +40,7 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
     const apifyInput: Record<string, unknown> = {
       currentCompanies: [input.companyUrl],
       maxItems: input.maxResults,
-      profileScraperMode: 'short',
+      profileScraperMode: 'Short',
     };
     if (input.jobTitle) apifyInput['keywords'] = input.jobTitle;
     if (input.location) apifyInput['locations'] = [input.location];
