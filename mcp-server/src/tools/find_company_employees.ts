@@ -52,6 +52,14 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
     const employees: EmployeeResult[] = items.slice(0, input.maxResults).map((e) => {
       const url = str(e['linkedinUrl'] ?? e['url'] ?? e['profileUrl']);
       const slugMatch = url.match(/\/in\/([^/?#]+)/);
+      const slug = slugMatch?.[1] ?? '';
+      // URN-style ids start with "ACw" / "ACo" and ARE case-sensitive — do NOT
+      // lowercase those. Vanity slugs (no caps, lowercase-only by spec) are
+      // safe to lowercase. Detect URN by the leading "AC" prefix.
+      const isUrn = /^AC[a-zA-Z0-9]/.test(slug);
+      // Prefer explicit publicIdentifier/vanityName field if the actor exposes it.
+      const explicitSlug = str(e['publicIdentifier'] ?? e['vanityName'] ?? e['publicId']);
+      const publicId = explicitSlug || (isUrn ? slug : slug.toLowerCase());
       // linkedin-profile-search Short returns firstName + lastName (not `name`)
       const firstName = str(e['firstName']);
       const lastName = str(e['lastName']);
@@ -64,7 +72,7 @@ export const findCompanyEmployees = withInstrumentation<FindCompanyEmployeesInpu
       const location = locObj ? str(locObj['linkedinText']) : str(e['location']);
       return {
         url,
-        publicId: (slugMatch?.[1] ?? '').toLowerCase(),
+        publicId,
         name,
         title,
         location,

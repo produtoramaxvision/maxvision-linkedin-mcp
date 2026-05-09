@@ -44,13 +44,34 @@ export const searchCompanies = withInstrumentation<SearchCompaniesInput, SearchC
     const items = await runApifyActor({ actor: ACTOR, context: 'search_companies', input: apifyInput });
 
     const str = (v: unknown): string => (v == null ? '' : String(v));
+    // harvestapi actors return mixed shapes across versions:
+    //   - location/headquarters can be a string OR { city, country, linkedinText }
+    //   - employee counts surface as `employeeCount`, `employeesCount`, `companySize`, `size`
+    //   - follower counts surface as `followerCount`, `followers`, `followersCount`
+    const flattenLoc = (v: unknown): string => {
+      if (v == null) return '';
+      if (typeof v === 'string') return v;
+      if (typeof v === 'object') {
+        const o = v as Record<string, unknown>;
+        return str(o['linkedinText'] ?? o['city'] ?? o['country'] ?? o['name']);
+      }
+      return String(v);
+    };
+    const num = (v: unknown): number => {
+      if (typeof v === 'number') return v;
+      if (typeof v === 'string') {
+        const n = Number(v.replace(/[^\d.-]/g, ''));
+        return Number.isFinite(n) ? n : 0;
+      }
+      return 0;
+    };
     const companies = items.slice(0, input.maxResults).map((c) => ({
-      url: str(c['url'] ?? c['linkedinUrl']),
-      name: str(c['name'] ?? c['companyName']),
-      industry: str(c['industry']),
-      location: str(c['location'] ?? c['headquarters']),
-      companySize: str(c['companySize'] ?? c['size']),
-      followers: typeof c['followers'] === 'number' ? c['followers'] : 0,
+      url: str(c['url'] ?? c['linkedinUrl'] ?? c['companyUrl']),
+      name: str(c['name'] ?? c['companyName'] ?? c['title']),
+      industry: str(c['industry'] ?? c['industryName'] ?? c['industries']),
+      location: flattenLoc(c['location'] ?? c['headquarters'] ?? c['hq']),
+      companySize: str(c['companySize'] ?? c['size'] ?? c['employeeCount'] ?? c['employeesCount']),
+      followers: num(c['followers'] ?? c['followerCount'] ?? c['followersCount']),
     })).filter((c) => c.url.length > 0);
 
     return { count: companies.length, companies };

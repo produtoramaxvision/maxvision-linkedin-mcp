@@ -6,6 +6,38 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.2 — production-readiness pass)
+
+- **CRITICAL: `default` accountId fallback** (`mcp-server/src/db/repos/accounts.repo.ts`)
+  — `getAccountById('default')` now falls back to the first `status='active'`
+  account ordered by `created_at` when no explicit `default` row exists.
+  Previously every tool call from a fresh user blew up with
+  `Account not found: default` because the schema defaults `accountId='default'`
+  but `/linkedin-cookie-refresh` creates rows with explicit names like
+  `sandbox-1`. Named accountIds still resolve directly with no fallback.
+- **CRITICAL: `JobUrlSchema` URL normalization** (`mcp-server/src/tools/schemas.ts`)
+  — `get_job_details` and `apply_easy` now accept any LinkedIn job URL variant
+  (`br.linkedin.com`, `uk.linkedin.com`, slug-prefixed, query-suffixed) and
+  internally rewrite to canonical `https://www.linkedin.com/jobs/view/<id>/`.
+  Unbreaks the `search_jobs` → `get_job_details` flow which previously failed
+  validation because `search_jobs` returns slug+id URLs but `get_job_details`
+  required numeric-only.
+- **MINOR: `find_company_employees` URN-style id casing**
+  (`mcp-server/src/tools/find_company_employees.ts`) — `publicId` now preserves
+  case for URN-style ids (`ACw...`, `ACo...`) and prefers explicit
+  `publicIdentifier`/`vanityName` fields when the actor exposes them. Old
+  behavior `.toLowerCase()` was breaking URN ids which are case-sensitive.
+- **MINOR: `search_companies` defensive field mapping**
+  (`mcp-server/src/tools/search_companies.ts`) — handles location-as-object
+  (`{linkedinText, city, country}`) and multiple known field aliases for
+  industry, employeeCount, followerCount across actor versions. Previously
+  many fields returned empty.
+
+### Added (tests)
+
+- `mcp-server/src/tools/schemas.test.ts` — 9 unit tests covering JobUrl
+  normalization variants and accountId default behavior.
+
 ### Added
 
 - **Multi-provider LLM support** (`mcp-server/src/auth/llm-provider.ts`):

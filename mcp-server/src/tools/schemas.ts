@@ -73,10 +73,40 @@ export type GetProfileInput = z.infer<typeof GetProfileInputSchema>;
 // get_job_details — input.
 // ----------------------------------------------------------------------------
 
+/**
+ * Accepts any LinkedIn job URL variant and normalizes to the canonical
+ * `https://www.linkedin.com/jobs/view/<id>/` form. v0.13.2 fix for the
+ * search_jobs → get_job_details flow: search_jobs returns slugged URLs
+ * like `https://br.linkedin.com/jobs/view/<slug>-<id>?...` which the old
+ * `/jobs/view/\d+/` regex rejected.
+ *
+ * Accepted variants:
+ *   - https://www.linkedin.com/jobs/view/4198123483/
+ *   - https://br.linkedin.com/jobs/view/engenheiro-de-software-at-xp-inc-4198123483
+ *   - https://uk.linkedin.com/jobs/view/4198123483?refId=...
+ *   - https://linkedin.com/jobs/view/some-slug-4198123483/?lipi=...
+ *
+ * Rejected: any URL not matching `linkedin.com/jobs/view/.../<digits>` at
+ * the end of the path.
+ */
 export const JobUrlSchema = z
   .string()
   .url()
-  .regex(/linkedin\.com\/jobs\/view\/\d+/, 'Must be /jobs/view/<id>');
+  .transform((raw, ctx) => {
+    if (!/linkedin\.com\/jobs\/view\//.test(raw)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Must be a LinkedIn /jobs/view/ URL' });
+      return z.NEVER;
+    }
+    const match = raw.match(/\/jobs\/view\/(?:[^/?#]*-)?(\d+)(?:[/?#]|$)/);
+    if (!match) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Must end with numeric job id (e.g. /jobs/view/4198123483)',
+      });
+      return z.NEVER;
+    }
+    return `https://www.linkedin.com/jobs/view/${match[1]}/`;
+  });
 
 export const GetJobDetailsInputShape = {
   accountId: AccountIdSchema,

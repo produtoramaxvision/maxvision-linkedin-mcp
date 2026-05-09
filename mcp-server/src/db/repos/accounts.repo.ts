@@ -21,10 +21,23 @@ export async function createAccount(data: NewAccount): Promise<Account> {
 
 /**
  * Lookup by primary key (e.g. "default" for Sprint 1's seeded account).
+ *
+ * v0.13.2 fallback: when id='default' has no row, fall back to the first
+ * active account by `created_at`. This unblocks new users who run tools
+ * before explicitly creating a 'default' account, while keeping multi-account
+ * pools intact (named ids resolve directly).
  */
 export async function getAccountById(id: string): Promise<Account | null> {
   const [row] = await db.select().from(accounts).where(eq(accounts.id, id)).limit(1);
-  return row ?? null;
+  if (row) return row;
+  if (id !== 'default') return null;
+  const [fallback] = await db
+    .select()
+    .from(accounts)
+    .where(eq(accounts.status, 'active'))
+    .orderBy(accounts.createdAt)
+    .limit(1);
+  return fallback ?? null;
 }
 
 /**
