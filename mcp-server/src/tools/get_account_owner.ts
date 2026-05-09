@@ -51,11 +51,13 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
       const page = await context.newPage();
       logger.info({ accountId }, 'get_account_owner nav /feed start');
 
-      // v0.13.7: prefer /me/ redirect chain — LinkedIn redirects authenticated
-      // /me/ to /in/<viewer-slug>/, so the final page.url() reveals the slug
-      // without DOM scraping. /feed/ scrape (3-layer) kept as enrichment
-      // attempt for fullName + headline; failure on enrichment doesn't fail
-      // the tool — slug from URL is sufficient.
+      // v0.13.8: navigate /me with `domcontentloaded` (avoids LinkedIn
+      // analytics-beacon hangs that block 'load'). Then in priority order:
+      //   1. final URL slug (LinkedIn redirected to /in/<slug>/)
+      //   2. <link rel="canonical"> href (rendered server-side)
+      //   3. <meta property="og:url"> content
+      //   4. <a class="global-nav__me-photo"> href (nav bar avatar)
+      //   5. legacy /feed 3-layer scrape (last resort, expensive)
       const meResponse = await page.goto('https://www.linkedin.com/me/', {
         waitUntil: 'domcontentloaded',
         timeout: 30000,
@@ -74,37 +76,52 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
           redirectedTo: finalMeUrl,
         });
       }
-      const slugFromUrl = finalMeUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
 
-      // Now on /in/<slug>/ — the profile page. Extract fullName + headline
-      // from public profile DOM (more reliable than /feed scrape).
-      const enriched = await page.evaluate((): { fullName: string; headline: string } => {
+      // Layer 1 — final URL slug (LinkedIn followed /me redirect).
+      let slug = finalMeUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
+
+      // Layers 2-4 — DOM/meta extraction. Cheap; runs even when slug found
+      // so we capture fullName + headline as enrichment.
+      const dom = await page.evaluate((): {
+        canonical: string;
+        ogUrl: string;
+        navPhoto: string;
+        fullName: string;
+        headline: string;
+      } => {
+        const canonical = (document.querySelector('link[rel="canonical"]') as HTMLLinkElement | null)?.href ?? '';
+        const ogUrl = (document.querySelector('meta[property="og:url"]') as HTMLMetaElement | null)?.content ?? '';
+        const navPhoto = (document.querySelector('a.global-nav__me-photo, a[data-test-app-aware-link][href*="/in/"]') as HTMLAnchorElement | null)?.href ?? '';
         const titleEl = document.querySelector('h1.text-heading-xlarge, h1');
         const fullName = (titleEl?.textContent ?? '').trim();
         const headlineEl = document.querySelector('.text-body-medium, [data-test-id="hero-title"] + div');
         const headline = (headlineEl?.textContent ?? '').trim();
-        return { fullName, headline };
+        return { canonical, ogUrl, navPhoto, fullName, headline };
       });
 
-      if (slugFromUrl) {
+      if (!slug) slug = dom.canonical.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
+      if (!slug) slug = dom.ogUrl.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
+      if (!slug) slug = dom.navPhoto.match(/\/in\/([^/?#]+)/)?.[1] ?? '';
+
+      if (slug) {
         await page.close();
-        logger.info({ accountId, slug: slugFromUrl, source: 'me-redirect' }, 'get_account_owner ok');
+        logger.info({ accountId, slug, source: 'me-redirect' }, 'get_account_owner ok');
         return {
           accountId,
-          slug: slugFromUrl,
-          profileUrl: `https://www.linkedin.com/in/${slugFromUrl}/`,
-          fullName: enriched.fullName,
-          headline: enriched.headline,
+          slug,
+          profileUrl: `https://www.linkedin.com/in/${slug}/`,
+          fullName: dom.fullName,
+          headline: dom.headline,
           source: 'me-redirect',
         };
       }
 
-      // Fallback — /me did not redirect to /in/<slug>. Try the legacy /feed
-      // 3-layer DOM scrape.
-      logger.warn({ accountId, finalMeUrl }, '/me did not yield slug, falling back to /feed scrape');
+      // Last resort — /feed 3-layer scrape. Use domcontentloaded (not 'load')
+      // to avoid analytics-beacon hangs.
+      logger.warn({ accountId, finalMeUrl, dom }, '/me did not yield slug via any layer, falling back to /feed');
       await page.goto('https://www.linkedin.com/feed/', {
-        waitUntil: 'load',
-        timeout: 60000,
+        waitUntil: 'domcontentloaded',
+        timeout: 30000,
       });
 
       const owner = await page.evaluate((): OwnerScrape | null => {

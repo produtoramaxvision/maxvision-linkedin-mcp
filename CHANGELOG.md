@@ -6,6 +6,20 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.8 — get_account_owner multi-layer slug extraction)
+
+- **/me did not yield slug + /feed waitUntil:'load' timeout 60s**: empirical
+  observation on production showed LinkedIn returns `/me/?_l=pt_BR` without
+  redirecting to `/in/<slug>/` from datacenter IPs, AND `/feed/` `load`
+  event hangs on analytics beacons. v0.13.8 layered extraction:
+  1. final URL slug (when LinkedIn does redirect)
+  2. `<link rel="canonical">` href (server-side rendered, robust)
+  3. `<meta property="og:url">` content
+  4. `<a class="global-nav__me-photo">` href (logged-in nav avatar)
+  5. legacy /feed 3-layer scrape (now `domcontentloaded` not `load`)
+- /feed fallback `waitUntil` `load` → `domcontentloaded` to avoid analytics
+  hang. Tradeoff: less hydrated state but at least it returns.
+
 ### Fixed (v0.13.7 — get_account_owner /me redirect strategy)
 
 - **/feed/ DOM scrape returned null** consistently — LinkedIn ships /feed
