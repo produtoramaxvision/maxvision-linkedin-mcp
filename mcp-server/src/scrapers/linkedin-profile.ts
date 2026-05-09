@@ -277,12 +277,36 @@ function mapApifyHarvestProfile(raw: Record<string, unknown>, profileUrl: string
   // Experience entries from harvestapi have shape:
   //   { position, companyName, companyLinkedinUrl, employmentType,
   //     workplaceType, duration, description, location, ... }
+  // harvestapi date fields are {month?, year?, text?} objects, not strings.
+  const dateStr = (v: unknown): string => {
+    if (v == null) return '';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      if (typeof o['text'] === 'string') return o['text'];
+      const month = o['month'] != null ? String(o['month']) : '';
+      const year = o['year'] != null ? String(o['year']) : '';
+      return [month, year].filter(Boolean).join(' ');
+    }
+    return String(v);
+  };
+  const dateYear = (v: unknown): number => {
+    if (v == null) return 0;
+    if (typeof v === 'object') {
+      const o = v as Record<string, unknown>;
+      const y = o['year'];
+      if (typeof y === 'number') return y;
+      if (typeof y === 'string') return parseYear(y);
+    }
+    return parseYear(v);
+  };
+
   const exp = (get<unknown[]>('experience') ?? []) as Array<Record<string, unknown>>;
   const experience: ProfileExperience[] = exp.slice(0, 25).map((e) => ({
     title: str(e['position'] ?? e['title']),
     company: str(e['companyName'] ?? e['company']),
-    startDate: str(e['startDate'] ?? e['duration']),
-    endDate: e['endDate'] != null ? str(e['endDate']) : null,
+    startDate: dateStr(e['startDate']) || str(e['duration']),
+    endDate: e['endDate'] != null ? dateStr(e['endDate']) : null,
     location: str(e['location']),
     description: str(e['description']),
   }));
@@ -293,8 +317,8 @@ function mapApifyHarvestProfile(raw: Record<string, unknown>, profileUrl: string
     school: str(ed['schoolName'] ?? ed['school'] ?? ed['title']),
     degree: ed['degree'] != null ? str(ed['degree']) : undefined,
     field: ed['fieldOfStudy'] != null ? str(ed['fieldOfStudy']) : (ed['field'] != null ? str(ed['field']) : undefined),
-    startYear: parseYear(ed['startDate'] ?? ed['startYear']),
-    endYear: ed['endDate'] != null ? parseYear(ed['endDate']) : (ed['endYear'] != null ? parseYear(ed['endYear']) : null),
+    startYear: dateYear(ed['startDate'] ?? ed['startYear']),
+    endYear: ed['endDate'] != null ? dateYear(ed['endDate']) : (ed['endYear'] != null ? dateYear(ed['endYear']) : null),
   }));
 
   // Skills entries: { name: "SaaS", endorsements: "92 endorsements" }
