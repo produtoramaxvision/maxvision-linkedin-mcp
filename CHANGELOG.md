@@ -6,6 +6,20 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.9 — get_account_owner via voyager API)
+
+- **/me + /feed HTML scrape both unreliable from datacenter IPs**: empirical
+  observation across v0.13.7-8 — LinkedIn renders interstitial loading pages
+  on /me from Oracle ASN, AND /feed times out (analytics beacons hang).
+- v0.13.9 swap: navigate `https://www.linkedin.com/` (lightweight) so
+  cookies are bound to the linkedin.com origin, then `page.evaluate(fetch)`
+  hits `/voyager/api/identity/dash/profiles?q=memberIdentity&memberIdentity=me`
+  directly with `csrf-token` derived from JSESSIONID. Browser auto-attaches
+  hydrated li_at + JSESSIONID cookies. Walks the response JSON to find the
+  first miniProfile with `publicIdentifier` + `firstName` + `lastName` +
+  `headline`. Bypasses HTML scraping entirely.
+- Legacy /me + /feed scrape paths kept as last-resort fallback.
+
 ### Fixed (v0.13.8 — get_account_owner multi-layer slug extraction)
 
 - **/me did not yield slug + /feed waitUntil:'load' timeout 60s**: empirical
