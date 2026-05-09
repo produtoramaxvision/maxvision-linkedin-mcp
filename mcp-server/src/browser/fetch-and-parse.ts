@@ -64,11 +64,16 @@ export async function fetchAndParse<T>(args: FetchAndParseArgs<T>): Promise<T> {
   const cfg = resolveScrapingBackend();
   const cookies = await loadAccountCookies(args.accountId);
 
-  // Path A — proxied backend (Scrapfly/BrightData).
-  if (cfg.backend !== 'patchright') {
+  // Path A — HTTP scrape backends (Scrapfly / Firecrawl / Apify) return
+  // pre-rendered HTML for cheerio. BrightData is NOT in this set — it's a
+  // remote browser routed through browserPool below (Path B). The scrape()
+  // helper returns null for brightdata to signal "use the browser path".
+  const proxiedHttp =
+    cfg.backend === 'scrapfly' || cfg.backend === 'firecrawl' || cfg.backend === 'apify';
+  if (proxiedHttp) {
     logger.info(
       { accountId: args.accountId, url: args.url, backend: cfg.backend, context: args.context },
-      'fetchAndParse via proxied backend',
+      'fetchAndParse via proxied HTTP backend',
     );
     const result = (await scrape({
       url: args.url,
