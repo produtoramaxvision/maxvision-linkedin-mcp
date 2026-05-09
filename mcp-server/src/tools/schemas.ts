@@ -287,6 +287,20 @@ export const GetProfileActivityInputShape = {
 export const GetProfileActivityInputSchema = z.object(GetProfileActivityInputShape);
 export type GetProfileActivityInput = z.infer<typeof GetProfileActivityInputSchema>;
 
+// ----------------------------------------------------------------------------
+// Sprint 1.5 — list_applications (local DB read).
+// ----------------------------------------------------------------------------
+
+export const ListApplicationsInputShape = {
+  accountId: AccountIdSchema,
+  status: ApplicationStatusSchema.optional().describe(
+    'Filter by status; omit to return all states',
+  ),
+  limit: z.number().int().positive().max(200).default(50),
+};
+export const ListApplicationsInputSchema = z.object(ListApplicationsInputShape);
+export type ListApplicationsInput = z.infer<typeof ListApplicationsInputSchema>;
+
 // monitor_post_engagement — fetch reactions + comments for a single post URL.
 export const MonitorPostEngagementInputShape = {
   accountId: AccountIdSchema,

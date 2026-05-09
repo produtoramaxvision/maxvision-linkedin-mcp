@@ -6,6 +6,22 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Added (v0.13.4 — list_applications tool, Sprint 1.5 close-out)
+
+- **New MCP tool `list_applications`** (16th tool total). Local DB read paired
+  with `track_application` to enumerate the user's pipeline without a SQL
+  fallback in `/linkedin-applications`. Inputs: `accountId`, optional
+  `status` filter (saved|applied|interviewing|rejected|offered|withdrawn),
+  `limit` (max 200, default 50). Output rows: `{id, jobUrl, jobTitle,
+  company, status, submittedAt, historyLen}`.
+- `applications.repo.findByStatus(accountId, status, limit)` for filtered
+  reads.
+- Rate-limit policy: capacity 100 / refill 1tps (lenient — local DB read).
+- Plugin command `/linkedin-applications` rewritten: `allowed-tools` wires
+  the new MCP tool; SQL fallback removed; flags `--status`, `--limit`,
+  `--account` documented; markdown table output spec.
+- Plugin: 0.13.3 → 0.13.4.
+
 ### Fixed (v0.13.3 — search_companies actor field name)
 
 - **CRITICAL BUG 5 root cause**: `harvestapi/linkedin-company-search` actor
