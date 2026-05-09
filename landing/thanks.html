@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="pt-BR" class="scroll-smooth">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Bem-vindo — MaxVision LinkedIn Suite</title>
+    <meta name="robots" content="noindex" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              brand: { 50: '#eef5ff', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 900: '#0f172a' },
+            },
+            fontFamily: {
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      body { font-family: 'Inter', system-ui, sans-serif; }
+      .copy-btn { transition: all 0.15s; }
+      .copy-btn.copied { background: #10b981 !important; }
+    </style>
+  </head>
+  <body class="min-h-screen bg-gradient-to-b from-brand-50 to-white text-brand-900">
+    <header class="container mx-auto max-w-3xl px-6 py-6 flex items-center justify-between">
+      <a href="/" class="text-xl font-bold tracking-tight">MaxVision LinkedIn</a>
+      <a href="/pricing" class="text-sm text-gray-500 hover:text-brand-700">← Pricing</a>
+    </header>
+
+    <main class="container mx-auto max-w-3xl px-6 py-12">
+      <div id="loading" class="text-center py-16">
+        <div class="inline-block w-12 h-12 border-4 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+        <p class="mt-4 text-gray-600">Aguardando webhook do Stripe processar sua compra…</p>
+        <p class="mt-1 text-sm text-gray-400">Isso leva 5–10 segundos. Não feche esta página.</p>
+      </div>
+
+      <div id="error" class="hidden bg-red-50 border border-red-200 rounded-2xl p-6 my-6">
+        <h2 class="font-bold text-red-700 mb-2">Algo deu errado</h2>
+        <p id="error-msg" class="text-red-600 text-sm"></p>
+        <p class="mt-4 text-sm">Sua compra foi processada, mas não conseguimos exibir a license aqui. Verifique seu email (incluindo spam) ou entre em contato:
+          <a href="mailto:produtoramaxvision@gmail.com" class="text-brand-700 underline">produtoramaxvision@gmail.com</a>
+        </p>
+      </div>
+
+      <div id="success" class="hidden">
+        <div class="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+          <div class="flex items-center gap-3 mb-6">
+            <div class="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
+              <svg class="w-6 h-6 text-green-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"/></svg>
+            </div>
+            <h1 class="text-2xl font-extrabold">Bem-vindo ao MaxVision LinkedIn <span id="tier-label">Pro</span>!</h1>
+          </div>
+
+          <p class="text-gray-600 mb-2">Sua license key foi emitida com sucesso.</p>
+          <p class="text-sm text-gray-500 mb-6"><strong>Validade:</strong> até <span id="expires"></span></p>
+
+          <label class="block text-sm font-semibold mb-2">Sua license key</label>
+          <div class="flex gap-2 mb-8">
+            <code id="license-key" class="flex-1 font-mono text-sm bg-brand-900 text-brand-50 px-4 py-3 rounded-lg overflow-x-auto select-all"></code>
+            <button id="copy-btn" class="copy-btn bg-brand-600 text-white px-4 rounded-lg hover:bg-brand-700 font-semibold text-sm">Copiar</button>
+          </div>
+
+          <h2 class="text-xl font-bold mb-4">Como começar</h2>
+          <ol class="space-y-4">
+            <li>
+              <p class="font-semibold">1. Instalar o plugin</p>
+              <pre class="bg-gray-100 px-3 py-2 rounded text-sm font-mono overflow-x-auto">claude /plugin install maxvision-linkedin-suite</pre>
+            </li>
+            <li>
+              <p class="font-semibold">2. Exportar suas credenciais</p>
+              <pre id="env-cmd" class="bg-gray-100 px-3 py-2 rounded text-sm font-mono overflow-x-auto"></pre>
+              <p class="text-xs text-gray-500 mt-1">No PowerShell: <code>$env:MAXVISION_LICENSE = "..."</code></p>
+            </li>
+            <li>
+              <p class="font-semibold">3. Capturar cookie LinkedIn (uma vez)</p>
+              <pre class="bg-gray-100 px-3 py-2 rounded text-sm font-mono overflow-x-auto">/linkedin-cookie-refresh</pre>
+            </li>
+            <li>
+              <p class="font-semibold">4. Buscar vagas + automação completa</p>
+              <pre class="bg-gray-100 px-3 py-2 rounded text-sm font-mono overflow-x-auto">/linkedin-find-jobs &quot;Engenheiro de IA&quot;</pre>
+            </li>
+          </ol>
+
+          <div class="mt-10 bg-brand-50 border border-brand-100 rounded-xl p-6">
+            <p class="font-semibold text-brand-700">📖 Documentação completa</p>
+            <p class="text-sm text-gray-600 mt-1">
+              <a class="underline" href="https://github.com/produtoramaxvision/maxvision-linkedin-mcp">GitHub repo</a> ·
+              <a class="underline" href="https://discord.gg/maxvision">Discord priority</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="container mx-auto max-w-3xl px-6 py-12 text-sm text-gray-500 border-t border-gray-200">
+      © 2026 Produtora MaxVision · <a href="/" class="hover:text-brand-700">linkedin.produtoramaxvision.com.br</a>
+    </footer>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const sessionId = params.get('session');
+      const $loading = document.getElementById('loading');
+      const $success = document.getElementById('success');
+      const $error = document.getElementById('error');
+      const $errorMsg = document.getElementById('error-msg');
+
+      async function fetchLicense(retry = 0) {
+        if (!sessionId) {
+          $loading.classList.add('hidden');
+          $error.classList.remove('hidden');
+          $errorMsg.textContent = 'Sessão Stripe não fornecida na URL. Acesse /pricing para iniciar uma compra.';
+          return;
+        }
+        try {
+          const res = await fetch(`/api/license-fetch?session=${encodeURIComponent(sessionId)}`);
+          const data = await res.json();
+          if (res.status === 404 && data.error === 'not_found_yet' && retry < 12) {
+            // Webhook still processing — retry every 5s up to 60s.
+            setTimeout(() => fetchLicense(retry + 1), 5000);
+            return;
+          }
+          if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+
+          $loading.classList.add('hidden');
+          $success.classList.remove('hidden');
+          document.getElementById('tier-label').textContent = data.tier === 'agency' ? 'Agency' : 'Pro';
+          document.getElementById('license-key').textContent = data.licenseKey;
+          document.getElementById('expires').textContent = new Date(data.expiresAt).toLocaleDateString('pt-BR');
+          document.getElementById('env-cmd').textContent = `export MAXVISION_LICENSE=${data.licenseKey}`;
+        } catch (err) {
+          $loading.classList.add('hidden');
+          $error.classList.remove('hidden');
+          $errorMsg.textContent = err.message;
+        }
+      }
+      fetchLicense();
+
+      // Copy to clipboard
+      document.getElementById('copy-btn').addEventListener('click', async (e) => {
+        const key = document.getElementById('license-key').textContent;
+        try {
+          await navigator.clipboard.writeText(key);
+          e.target.textContent = '✓ Copiado!';
+          e.target.classList.add('copied');
+          setTimeout(() => {
+            e.target.textContent = 'Copiar';
+            e.target.classList.remove('copied');
+          }, 2000);
+        } catch {
+          alert('Erro ao copiar. Selecione manualmente.');
+        }
+      });
+    </script>
+  </body>
+</html>

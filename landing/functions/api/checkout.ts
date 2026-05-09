@@ -57,12 +57,18 @@ export const onRequestPost: PagesFunction<Env> = async (ctx) => {
   params.set('mode', 'subscription');
   params.set('line_items[0][price]', body.priceId);
   params.set('line_items[0][quantity]', '1');
-  params.set('success_url', 'https://linkedin.produtoramaxvision.com.br/thanks?session={CHECKOUT_SESSION_ID}');
-  params.set('cancel_url', 'https://linkedin.produtoramaxvision.com.br/pricing');
+  params.set('success_url', 'https://linkedin.produtoramaxvision.com.br/thanks.html?session={CHECKOUT_SESSION_ID}');
+  params.set('cancel_url', 'https://linkedin.produtoramaxvision.com.br/pricing.html');
   params.set('metadata[tier]', body.tier);
   params.set('metadata[expires_in_days]', body.period === 'yearly' ? '365' : '31');
   params.set('locale', 'pt-BR');
   params.set('billing_address_collection', 'required');
+  // Sprint 8 — phone collection (optional) for WhatsApp delivery via
+  // Evolution API. Phone shows up in checkout.session.completed at
+  // session.customer_details.phone.
+  params.set('phone_number_collection[enabled]', 'true');
+  // `customer_creation` is only valid in `mode=payment`. Subscription mode
+  // auto-creates a customer record on Stripe's side — nothing to opt-in.
 
   const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
