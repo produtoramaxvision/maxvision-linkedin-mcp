@@ -39,10 +39,16 @@ const proxyPassword = process.env['PATCHRIGHT_PROXY_PASSWORD'];
 export const launchOptions: LaunchOptions = {
   // Patchright README: "headless: false" is the only reliably undetected mode.
   headless: false,
+  // BrightData (and most residential proxy providers) inject a self-signed CA
+  // root for HTTPS interception. Without ignoreHTTPSErrors, all proxied HTTPS
+  // navigations fail with ERR_CERT_AUTHORITY_INVALID. The flag is conditional
+  // so direct (non-proxied) Patchright keeps strict TLS verification.
+  ...(proxyServer ? { ignoreHTTPSErrors: true } : {}),
   args: [
     '--disable-blink-features=AutomationControlled',
     '--disable-dev-shm-usage',
     '--no-sandbox',
+    ...(proxyServer ? ['--ignore-certificate-errors'] : []),
   ],
   ...(proxyServer
     ? {

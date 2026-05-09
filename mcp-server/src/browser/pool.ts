@@ -98,6 +98,19 @@ class BrowserPool {
     if (isBrightDataMode()) {
       // BrightData Scraping Browser path — connect to remote Chromium via
       // wss CDP. Residential IP + auto CAPTCHA + fingerprint rotation.
+      //
+      // KNOWN LIMITATION: BrightData's generic Scraping Browser ENFORCES a
+      // hard policy blocking `li_at`/`bcookie`/`lidc` cookie injection via
+      // `Storage.setCookies` AND via `Page.navigate` Cookie header. Validated
+      // empirically (Sprint 6.6 diagnostic) — newContext() + clearCookies()
+      // do NOT bypass it. This path therefore only works for guest endpoints
+      // (`/jobs/search`, `/jobs/view/<id>`, public company pages).
+      //
+      // For authenticated endpoints (`/in/<slug>`, `/feed`,
+      // `/search/results/people`) use SCRAPING_BACKEND=patchright +
+      // PATCHRIGHT_PROXY_URL pointing to a BrightData Residential Proxy zone
+      // (port 22225 HTTP, NOT port 9222 wss Scraping Browser zone). That gives
+      // residential IP + full local cookie control via Patchright.
       const wsEndpoint = process.env['BRIGHTDATA_PROXY_URL']!;
       logger.info({ accountId, endpoint: 'brightdata' }, 'connecting BrightData CDP');
       const remoteBrowser = await chromium.connectOverCDP(wsEndpoint);
