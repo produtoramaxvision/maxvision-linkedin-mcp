@@ -56,19 +56,20 @@ export const listFeed = withInstrumentation<ListFeedInput, ListFeedOutput>({
     // Path A — try cookie-based DOM scrape of the personal /feed timeline.
     // This is the only way to get a USER-SPECIFIC feed; Apify post-search
     // returns trending posts by keyword, not the user's curated timeline.
+    //
+    // Any failure on Path A (no account row, expired cookie, authwall redirect,
+    // network error) triggers Path B fallback when APIFY_TOKEN+
+    // LIST_FEED_APIFY_FALLBACK are configured. Operators who want strict
+    // cookie-only semantics set LIST_FEED_APIFY_FALLBACK=false.
     let items: FeedItem[] = [];
     let cookieFailed = false;
+    let cookieFailReason = '';
     try {
       items = await runFeedScrape(accountId, input);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      cookieFailed =
-        msg.includes('ERR_HTTP_RESPONSE_CODE_FAILURE') ||
-        msg.includes('uas/login') ||
-        msg.includes('authwall') ||
-        msg.includes('COOKIE_EXPIRED');
-      if (!cookieFailed) throw err;
-      logger.warn({ accountId }, 'list_feed cookie path failed — falling back to Apify post-search');
+      cookieFailed = true;
+      cookieFailReason = err instanceof Error ? err.message : String(err);
+      logger.warn({ accountId, reason: cookieFailReason }, 'list_feed cookie path failed — trying Apify post-search fallback');
     }
 
     // Path B fallback — when cookie path fails, fetch trending posts via Apify
@@ -80,8 +81,8 @@ export const listFeed = withInstrumentation<ListFeedInput, ListFeedOutput>({
       if (!apifyFallback || !process.env['APIFY_TOKEN']) {
         throw new AppError(
           'COOKIE_EXPIRED',
-          `list_feed requires a freshly captured LinkedIn cookie for account "${accountId}". Run /linkedin-cookie-refresh and retry. (LinkedIn invalidated the existing session. Set LIST_FEED_APIFY_FALLBACK=true + APIFY_TOKEN to enable trending-post fallback.)`,
-          { accountId },
+          `list_feed cookie path failed for account "${accountId}" (${cookieFailReason}). Run /linkedin-cookie-refresh and retry, or set LIST_FEED_APIFY_FALLBACK=true + APIFY_TOKEN to enable trending-post fallback.`,
+          { accountId, reason: cookieFailReason },
         );
       }
       try {
