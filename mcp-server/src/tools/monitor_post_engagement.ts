@@ -84,21 +84,31 @@ export const monitorPostEngagement = withInstrumentation<MonitorPostEngagementIn
         : Promise.resolve([] as Array<Record<string, unknown>>),
     ]);
 
-    const reactions: ReactionItem[] = reactionsRaw.slice(0, input.maxReactions).map((r) => ({
-      reactor: str(r['name'] ?? r['reactorName'] ?? r['fullName']),
-      reactorUrl: str(r['url'] ?? r['profileUrl'] ?? r['reactorUrl']),
-      reactorHeadline: str(r['headline'] ?? r['position']),
-      reactionType: str(r['reactionType'] ?? r['type'] ?? 'like'),
-    }));
+    // Reaction shape: { id, reactionType, postId, actor: { id, name, linkedinUrl, position, pictureUrl } }
+    const reactions: ReactionItem[] = reactionsRaw.slice(0, input.maxReactions).map((r) => {
+      const a = (r['actor'] as Record<string, unknown> | undefined) ?? {};
+      return {
+        reactor: str(a['name'] ?? r['name']),
+        reactorUrl: str(a['linkedinUrl'] ?? r['url'] ?? r['profileUrl']),
+        reactorHeadline: str(a['position'] ?? r['headline']),
+        reactionType: str(r['reactionType'] ?? r['type'] ?? 'LIKE'),
+      };
+    });
 
-    const comments: CommentItem[] = commentsRaw.slice(0, input.maxComments).map((c) => ({
-      commenter: str(c['commenterName'] ?? c['name'] ?? c['authorName']),
-      commenterUrl: str(c['commenterUrl'] ?? c['profileUrl'] ?? c['authorUrl']),
-      commenterHeadline: str(c['commenterHeadline'] ?? c['headline']),
-      text: str(c['text'] ?? c['content'] ?? c['comment']).slice(0, 1500),
-      postedAt: dateStr(c['postedAt'] ?? c['date'] ?? c['createdAt']),
-      likes: num(c['likes'] ?? c['numLikes']),
-    }));
+    // Comment shape: { id, linkedinUrl, commentary, createdAt, engagement: {likes, ...},
+    //                  actor: { id, name, linkedinUrl, position } }
+    const comments: CommentItem[] = commentsRaw.slice(0, input.maxComments).map((c) => {
+      const a = (c['actor'] as Record<string, unknown> | undefined) ?? {};
+      const eng = (c['engagement'] as Record<string, unknown> | undefined) ?? {};
+      return {
+        commenter: str(a['name'] ?? c['commenterName'] ?? c['name']),
+        commenterUrl: str(a['linkedinUrl'] ?? c['commenterUrl'] ?? c['profileUrl']),
+        commenterHeadline: str(a['position'] ?? c['commenterHeadline'] ?? c['headline']),
+        text: str(c['commentary'] ?? c['text'] ?? c['content']).slice(0, 1500),
+        postedAt: dateStr(c['createdAt'] ?? c['postedAt'] ?? c['date']),
+        likes: num(eng['likes'] ?? c['likes'] ?? c['numLikes']),
+      };
+    });
 
     return {
       postUrl: input.postUrl,
