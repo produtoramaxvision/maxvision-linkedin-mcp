@@ -51,9 +51,12 @@ export const getAccountOwner = withInstrumentation<GetAccountOwnerInput, GetAcco
       const page = await context.newPage();
       logger.info({ accountId }, 'get_account_owner nav /feed start');
 
+      // /feed/ takes longer than guest pages because LinkedIn ships heavy
+      // hydrated state. Use `load` (not `domcontentloaded`) so the embedded
+      // <code id="bpr-guid-*"> JSON blobs are present when we evaluate.
       const response = await page.goto('https://www.linkedin.com/feed/', {
-        waitUntil: 'domcontentloaded',
-        timeout: 30000,
+        waitUntil: 'load',
+        timeout: 60000,
       });
       const status = response?.status() ?? 0;
       if (status === 999) {
