@@ -52,11 +52,15 @@ export interface ProfileData {
   experience: ProfileExperience[];
   education: ProfileEducation[];
   skills: string[];
+  /** Verified work emails — populated only when Apify enrichment is enabled. */
+  emails?: string[];
   fetchedAt: string;
 }
 
 const BD_DATASET_ID = process.env['BRIGHTDATA_LINKEDIN_PROFILE_DATASET_ID'] ?? 'gd_l1viktl72bvl7bjuj0';
 const BD_SCRAPER_ENDPOINT = 'https://api.brightdata.com/datasets/v3/scrape';
+const APIFY_PROFILE_ACTOR = process.env['APIFY_LINKEDIN_PROFILE_ACTOR'] ?? 'dev_fusion~linkedin-profile-scraper';
+const APIFY_RUN_ENDPOINT = 'https://api.apify.com/v2/acts';
 
 /**
  * Map BrightData LinkedIn Profile JSON to internal ProfileData shape.
@@ -168,6 +172,82 @@ async function scrapeProfileViaBrightDataAPI(args: {
   return mapBrightDataProfile(record, profileUrl, slug);
 }
 
+/**
+ * Enrich a profile with Apify dev_fusion linkedin-profile-scraper output.
+ *
+ * BrightData LinkedIn Profile dataset does NOT return `skills` array nor
+ * verified work emails — confirmed empirically by inspecting the JSON
+ * payload top-level keys. Apify's `dev_fusion/linkedin-profile-scraper`
+ * actor returns both. We run this in parallel with the BD call so the
+ * combined latency stays close to the slower of the two.
+ *
+ * Pricing: Apify charges $10/1000 successful results (~$0.01 per profile).
+ * Combined with BD ($1.50/1k = $0.0015), the hybrid path costs ~$11.50/1k
+ * profiles for the full superset (BD's 50+ fields + Apify's skills + email).
+ *
+ * Failure mode: if Apify call fails, we log and proceed with BD-only data —
+ * skills/emails stay empty rather than failing the whole request.
+ */
+async function enrichProfileViaApify(args: {
+  profileUrl: string;
+  apifyToken: string;
+}): Promise<{ skills: string[]; emails: string[] }> {
+  const { profileUrl, apifyToken } = args;
+  const url =
+    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(APIFY_PROFILE_ACTOR)}/run-sync-get-dataset-items` +
+    `?token=${encodeURIComponent(apifyToken)}&format=json`;
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      profileUrls: [profileUrl],
+      maxItems: 1,
+    }),
+  });
+
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Apify ${res.status}: ${errBody.slice(0, 300)}`,
+      { status: res.status, actor: APIFY_PROFILE_ACTOR },
+    );
+  }
+
+  const items = (await res.json()) as Array<Record<string, unknown>>;
+  const record = items[0];
+  if (!record) return { skills: [], emails: [] };
+
+  const skillsRaw = record['skills'];
+  let skills: string[] = [];
+  if (Array.isArray(skillsRaw)) {
+    skills = skillsRaw
+      .map((s) => {
+        if (typeof s === 'string') return s;
+        if (s && typeof s === 'object' && 'title' in s) return String((s as Record<string, unknown>)['title'] ?? '');
+        if (s && typeof s === 'object' && 'name' in s) return String((s as Record<string, unknown>)['name'] ?? '');
+        return '';
+      })
+      .filter((s) => s.length > 0)
+      .slice(0, 50);
+  }
+
+  const emails: string[] = [];
+  const emailFields = ['email', 'workEmail', 'verifiedEmail', 'emails'];
+  for (const f of emailFields) {
+    const v = record[f];
+    if (typeof v === 'string' && v.includes('@')) emails.push(v);
+    if (Array.isArray(v)) {
+      for (const e of v) {
+        if (typeof e === 'string' && e.includes('@')) emails.push(e);
+      }
+    }
+  }
+
+  return { skills, emails: Array.from(new Set(emails)) };
+}
+
 export async function scrapeProfile(args: {
   accountId: string;
   profileUrl: string;
@@ -176,18 +256,49 @@ export async function scrapeProfile(args: {
   const slug = extractPublicId(profileUrl);
 
   const apiToken = process.env['BRIGHTDATA_API_TOKEN'];
+  const apifyToken = process.env['APIFY_TOKEN'];
   if (apiToken) {
     logger.info(
-      { accountId, profileUrl, slug, backend: 'brightdata-scraper-api' },
+      { accountId, profileUrl, slug, backend: 'brightdata-scraper-api', apifyEnrichment: !!apifyToken },
       'profile fetch start (BrightData Scraper API)',
     );
     try {
-      const data = await scrapeProfileViaBrightDataAPI({ profileUrl, slug, apiToken });
+      // Run BD (primary) and Apify (enrichment for skills + emails) in parallel.
+      // Apify is best-effort — if it fails, return BD-only data.
+      const [bdData, apifyResult] = await Promise.all([
+        scrapeProfileViaBrightDataAPI({ profileUrl, slug, apiToken }),
+        apifyToken
+          ? enrichProfileViaApify({ profileUrl, apifyToken }).catch((err) => {
+              logger.warn(
+                { accountId, slug, err: err instanceof Error ? err.message : String(err) },
+                'Apify enrichment failed — proceeding with BD-only data',
+              );
+              return { skills: [] as string[], emails: [] as string[] };
+            })
+          : Promise.resolve({ skills: [] as string[], emails: [] as string[] }),
+      ]);
+
+      const merged: ProfileData = {
+        ...bdData,
+        skills: apifyResult.skills.length > 0 ? apifyResult.skills : bdData.skills,
+        ...(apifyResult.emails.length > 0 ? { emails: apifyResult.emails } : {}),
+      };
+
       logger.info(
-        { accountId, slug, name: data.fullName, fields: { experience: data.experience.length, education: data.education.length, skills: data.skills.length } },
-        'profile scrape ok via BrightData Scraper API',
+        {
+          accountId,
+          slug,
+          name: merged.fullName,
+          fields: {
+            experience: merged.experience.length,
+            education: merged.education.length,
+            skills: merged.skills.length,
+            emails: merged.emails?.length ?? 0,
+          },
+        },
+        'profile scrape ok via BrightData + Apify hybrid',
       );
-      return data;
+      return merged;
     } catch (err) {
       logger.warn(
         { accountId, slug, err: err instanceof Error ? err.message : String(err) },

@@ -1,13 +1,31 @@
 /**
- * tools/search_people — Sprint 6.2 backend-aware.
+ * tools/search_people — Sprint 6.8 Apify-backed.
  *
- * Routes through fetchAndParse() — Patchright (free, authwall) or Scrapfly/
- * BrightData (Pro/Agency, bypasses).
+ * LinkedIn `/search/results/people/` requires a logged-in session. Even via
+ * residential proxy, the LinkedIn server redirects guest requests to
+ * /uas/login. The cookies-based DOM scraping path is therefore unreliable
+ * in production (sandbox cookies expire, get flagged, or the session is
+ * invalidated by LinkedIn's anti-fraud system).
+ *
+ * Sprint 6.8 pivots to Apify `harvestapi/linkedin-profile-search` which
+ * runs its own logged-in session pool internally and returns structured
+ * JSON (no cookies required from us).
+ *
+ * Pricing (https://apify.com/harvestapi/linkedin-profile-search):
+ *   - Short mode (this implementation): $0.10 per search page (≈25 results)
+ *     ≈ $0.004 per profile in basic-result mode
+ *   - Full mode: +$0.004/profile detailed extraction
+ *   - Full+Email: +$0.01/profile email lookup
+ *
+ * The previous HTML-based fallback is preserved when APIFY_TOKEN is unset
+ * so that operators without an Apify subscription still get the legacy
+ * (broken in 2026) behavior — better to fail fast than silently misbehave.
  */
 import { withInstrumentation } from './_base.js';
 import { SearchPeopleInputSchema, type SearchPeopleInput } from './schemas.js';
 import { fetchAndParse } from '../browser/fetch-and-parse.js';
 import { logger } from '../logger.js';
+import { AppError } from '../errors.js';
 
 interface PersonResult {
   url: string;
@@ -23,6 +41,63 @@ export interface SearchPeopleOutput {
   people: PersonResult[];
 }
 
+const APIFY_PEOPLE_ACTOR = process.env['APIFY_LINKEDIN_PEOPLE_SEARCH_ACTOR'] ?? 'harvestapi~linkedin-profile-search';
+const APIFY_RUN_ENDPOINT = 'https://api.apify.com/v2/acts';
+
+function extractPublicIdFromUrl(url: string): string {
+  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  return (m?.[1] ?? '').toLowerCase();
+}
+
+async function searchPeopleViaApify(args: {
+  input: SearchPeopleInput;
+  apifyToken: string;
+}): Promise<PersonResult[]> {
+  const { input, apifyToken } = args;
+  const url =
+    `${APIFY_RUN_ENDPOINT}/${encodeURIComponent(APIFY_PEOPLE_ACTOR)}/run-sync-get-dataset-items` +
+    `?token=${encodeURIComponent(apifyToken)}&format=json`;
+
+  const body: Record<string, unknown> = {
+    keywords: input.keywords,
+    maxItems: input.maxResults,
+    profileScraperMode: 'short',
+  };
+  if (input.company) body['currentCompanies'] = [input.company];
+  if (input.location) body['locations'] = [input.location];
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    throw new AppError(
+      'EXTERNAL_API_FAIL',
+      `Apify ${res.status} (${APIFY_PEOPLE_ACTOR}): ${errBody.slice(0, 300)}`,
+      { status: res.status, actor: APIFY_PEOPLE_ACTOR },
+    );
+  }
+
+  const items = (await res.json()) as Array<Record<string, unknown>>;
+  return items.slice(0, input.maxResults).map((it) => {
+    const profileUrl = String(it['linkedinUrl'] ?? it['profileUrl'] ?? it['url'] ?? '');
+    return {
+      url: profileUrl,
+      publicId: extractPublicIdFromUrl(profileUrl),
+      name: String(it['name'] ?? it['fullName'] ?? `${it['firstName'] ?? ''} ${it['lastName'] ?? ''}`).trim(),
+      headline: String(it['headline'] ?? it['position'] ?? ''),
+      location: String(it['location'] ?? it['locationName'] ?? ''),
+      currentCompany: String(
+        (it['currentCompany'] as Record<string, unknown> | undefined)?.['name']
+          ?? it['companyName']
+          ?? '',
+      ),
+    };
+  }).filter((p) => p.url.length > 0);
+}
+
 function buildSearchUrl(input: SearchPeopleInput): string {
   const params = new URLSearchParams({ keywords: input.keywords });
   if (input.company) params.set('currentCompany', input.company);
@@ -32,12 +107,30 @@ function buildSearchUrl(input: SearchPeopleInput): string {
 
 export const searchPeople = withInstrumentation<SearchPeopleInput, SearchPeopleOutput>({
   name: 'search_people',
-  description: 'Search LinkedIn people (Pro/Agency tier in Sprint 3).',
+  description: 'Search LinkedIn people by keywords, company, location. Powered by Apify (Pro/Agency).',
   inputSchema: SearchPeopleInputSchema,
   handler: async ({ input, accountId }) => {
-    const url = buildSearchUrl(input);
-    logger.info({ accountId, keywords: input.keywords, url }, 'search_people start');
+    logger.info({ accountId, keywords: input.keywords }, 'search_people start');
 
+    const apifyToken = process.env['APIFY_TOKEN'];
+    if (apifyToken) {
+      try {
+        const people = await searchPeopleViaApify({ input, apifyToken });
+        logger.info({ accountId, count: people.length, backend: 'apify' }, 'search_people via Apify ok');
+        return { count: people.length, people };
+      } catch (err) {
+        logger.warn(
+          { accountId, err: err instanceof Error ? err.message : String(err) },
+          'Apify search_people failed — falling back to HTML scrape (likely 2026-broken)',
+        );
+        // fall through
+      }
+    }
+
+    // Fallback path — almost certainly fails in 2026 because LinkedIn
+    // requires a logged-in session for /search/results/people. Kept for
+    // backward compat with operators who haven't configured APIFY_TOKEN.
+    const url = buildSearchUrl(input);
     const people = await fetchAndParse<PersonResult[]>({
       accountId,
       url,
@@ -52,11 +145,9 @@ export const searchPeople = withInstrumentation<SearchPeopleInput, SearchPeopleO
             const link = $el.find('a.app-aware-link[href*="/in/"]').first();
             const href = (link.attr('href') || '').split('?')[0] || '';
             if (!href) return;
-            const slugMatch = href.match(/\/in\/([^/]+)/);
-            const publicId = (slugMatch?.[1] || '').toLowerCase();
             out.push({
               url: href.startsWith('http') ? href : `https://www.linkedin.com${href}`,
-              publicId,
+              publicId: extractPublicIdFromUrl(href),
               name: $el.find('span[aria-hidden="true"]').first().text().trim(),
               headline: $el.find('.entity-result__primary-subtitle').first().text().trim(),
               location: $el.find('.entity-result__secondary-subtitle').first().text().trim(),
@@ -66,8 +157,7 @@ export const searchPeople = withInstrumentation<SearchPeopleInput, SearchPeopleO
         return out;
       },
     });
-
-    logger.info({ accountId, count: people.length }, 'search_people scrape ok');
+    logger.info({ accountId, count: people.length, backend: 'html' }, 'search_people via HTML ok');
     return { count: people.length, people };
   },
 });
