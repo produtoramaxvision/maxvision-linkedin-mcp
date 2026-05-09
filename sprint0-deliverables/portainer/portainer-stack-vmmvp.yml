@@ -1,28 +1,47 @@
 # ============================================================
-# MaxVision LinkedIn MCP — Portainer Stack (VPS vmmvp) — Sprint 1
+# MaxVision LinkedIn MCP — Portainer Stack (VPS vmmvp) — v0.13.1
 # Pré-preenchido para a VPS arm64 ubuntu@163.176.233.224
 #
 # Convenções específicas desta VPS:
 #   - Network externa: `net` (Traefik 3.4 já está nela; NÃO criar `traefik-public`).
 #   - Cert resolver: `letsencryptresolver` (nome atual; NÃO `letsencrypt`).
-#   - Postgres dedicado isolado (NÃO compartilhar com `postgres_postgres` v14
-#     que carrega n8n_queue, evolution, plane, shlink). Padrão `*_mxv_*` igual
-#     a firecrawl_mxv_*, paperclip_mxv_*, pgvector_mxv_*.
+#   - Postgres dedicado isolado. Padrão `*_mxv_*`.
 #   - Imagem MCP arm64 (CI multi-arch builda linux/amd64 + linux/arm64).
 #   - Domínio: linkedin-mcp.produtoramaxvision.com.br (DNS-only/gray no Cloudflare).
 #
 # DEPLOY (manual, via Portainer UI):
-#   1. Portainer → Stacks → Add stack
-#   2. Name: maxv-linkedin
-#   3. Build method: Web editor (cole o conteúdo deste arquivo)
-#   4. Em "Environment variables", definir:
-#        MCP_VERSION=0.1.0-sprint1
+#   1. Portainer → Stacks → Edit stack
+#   2. Em "Environment variables", definir TODAS as variáveis abaixo:
+#
+#   === OBRIGATÓRIAS ===
+#        MCP_VERSION=sha-86b6cd0            # ou "latest" para sempre usar main
 #        MCP_HOST=linkedin-mcp.produtoramaxvision.com.br
-#        POSTGRES_PASSWORD=<openssl rand -hex 24>
-#        MASTER_KEY=<openssl rand -hex 32>           # 64 hex chars (32 bytes)
-#        MCP_API_KEYS=mxv_xxx,mxv_yyy                # CSV de api keys
+#        POSTGRES_PASSWORD=<valor atual>
+#        MASTER_KEY=<valor atual 64 hex chars>
+#        MCP_API_KEYS=mxv_xxx,mxv_yyy
 #        ACME_EMAIL=produtoramaxvision@gmail.com
-#   5. Deploy.
+#
+#   === APIFY (backend principal — 13/15 tools) ===
+#        APIFY_TOKEN=<apify token>
+#        LIST_FEED_APIFY_FALLBACK=true
+#        LIST_FEED_APIFY_QUERY=linkedin
+#
+#   === BRIGHTDATA Web Unlocker (search_jobs, list_feed path A) ===
+#        SCRAPING_BACKEND=patchright
+#        PATCHRIGHT_PROXY_URL=http://brd.superproxy.io:33335
+#        PATCHRIGHT_PROXY_USERNAME=brd-customer-hl_ceb7cc08-zone-maxv_linkedin_unlocker
+#        PATCHRIGHT_PROXY_PASSWORD=<zone password>
+#
+#   === BRIGHTDATA Scraper API (get_profile mode=full) ===
+#        BRIGHTDATA_API_TOKEN=<account-level token>
+#        BRIGHTDATA_LINKEDIN_PROFILE_DATASET_ID=gd_l1viktl72bvl7bjuj0
+#
+#   === OPCIONAIS ===
+#        LOG_LEVEL=info
+#        RATE_LIMIT_PER_MINUTE=10
+#        LICENSE_CHECK_ENABLED=false    # true em produção paga
+#
+#   3. Deploy.
 # ============================================================
 version: "3.9"
 
@@ -41,6 +60,20 @@ services:
       RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-10}
       PROFILE_BASE_DIR: /data/profiles
       TZ: America/Sao_Paulo
+      # Apify backend
+      APIFY_TOKEN: ${APIFY_TOKEN}
+      LIST_FEED_APIFY_FALLBACK: ${LIST_FEED_APIFY_FALLBACK:-true}
+      LIST_FEED_APIFY_QUERY: ${LIST_FEED_APIFY_QUERY:-linkedin}
+      # BrightData Web Unlocker (search_jobs / patchright path A)
+      SCRAPING_BACKEND: ${SCRAPING_BACKEND:-patchright}
+      PATCHRIGHT_PROXY_URL: ${PATCHRIGHT_PROXY_URL}
+      PATCHRIGHT_PROXY_USERNAME: ${PATCHRIGHT_PROXY_USERNAME}
+      PATCHRIGHT_PROXY_PASSWORD: ${PATCHRIGHT_PROXY_PASSWORD}
+      # BrightData Scraper API (get_profile full mode)
+      BRIGHTDATA_API_TOKEN: ${BRIGHTDATA_API_TOKEN}
+      BRIGHTDATA_LINKEDIN_PROFILE_DATASET_ID: ${BRIGHTDATA_LINKEDIN_PROFILE_DATASET_ID:-gd_l1viktl72bvl7bjuj0}
+      # License
+      LICENSE_CHECK_ENABLED: ${LICENSE_CHECK_ENABLED:-false}
     volumes:
       - mcp_profiles_data:/data/profiles
     networks:
