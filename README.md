@@ -3,10 +3,10 @@
 LinkedIn automation for Claude Code: **16 MCP tools** for job search, applications, profile audit, outreach, company intelligence, and engagement monitoring.
 
 [![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.13.13-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
 [![Status](https://img.shields.io/badge/status-LIVE-brightgreen.svg)](https://linkedin.produtoramaxvision.com.br)
 
-> **Status:** Production. v0.13.13 LIVE at `https://linkedin-mcp.produtoramaxvision.com.br/mcp`. Free tier active; Pro/Agency tiers gated via `MAXVISION_LICENSE` header.
+> **Status:** Production. v0.1.0 LIVE at `https://linkedin-mcp.produtoramaxvision.com.br/mcp`. Free tier active; Pro/Agency tiers gated via `MAXVISION_LICENSE` header.
 
 ---
 
@@ -141,7 +141,7 @@ Pricing: <https://linkedin.produtoramaxvision.com.br/pricing>
 
 ## Self-host (advanced)
 
-The MCP server image is published on GHCR: `ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.13.13`. Three deploy modes documented in [docs/deploy-docker-swarm.md](docs/deploy-docker-swarm.md):
+The MCP server image is published on GHCR: `ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.1.0`. Three deploy modes documented in [docs/deploy-docker-swarm.md](docs/deploy-docker-swarm.md):
 
 - **Docker Compose** standalone (single host)
 - **Docker Swarm CLI** (multi-node, rolling updates)

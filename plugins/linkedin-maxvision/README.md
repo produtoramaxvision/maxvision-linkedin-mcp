@@ -2,7 +2,7 @@
 
 LinkedIn automation: 16 MCP tools, 8 commands, 4 agents, 6 skills, 4 n8n workflows.
 
-> **Status:** v0.13.13 LIVE at `https://linkedin-mcp.produtoramaxvision.com.br/mcp`.
+> **Status:** v0.1.0 LIVE at `https://linkedin-mcp.produtoramaxvision.com.br/mcp`.
 
 ## Install
 

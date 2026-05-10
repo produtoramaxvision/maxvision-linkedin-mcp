@@ -244,16 +244,17 @@
 
     <script>
       // Stripe Checkout via /api/checkout (Cloudflare Pages Function).
-      // Price IDs from Stripe test mode (acct_1SWLoDDUMJkQwpuN).
-      // Switch to live mode IDs once test validation is complete.
+      // TODO: Replace with live price IDs from acct_1SWXI9Ad1djWBWMQ.
+      // Create products at dashboard.stripe.com/products, then update below.
+      // See docs/stripe-live-activation.md for full setup guide.
       const PRICES = {
         pro: {
-          monthly: 'price_1TUwQaDUMJkQwpuN6GCkJlF1', // R$ 79
-          yearly: 'price_1TUwQbDUMJkQwpuNDg13xglr',  // R$ 790
+          monthly: 'price_REPLACE_PRO_MONTHLY',   // R$ 79/mês
+          yearly:  'price_REPLACE_PRO_YEARLY',    // R$ 790/ano
         },
         agency: {
-          monthly: 'price_1TUwQcDUMJkQwpuN2A44CHXx', // R$ 399
-          yearly: 'price_1TUwQdDUMJkQwpuNOF4pt9wB',  // R$ 3990
+          monthly: 'price_REPLACE_AGENCY_MONTHLY', // R$ 399/mês
+          yearly:  'price_REPLACE_AGENCY_YEARLY',  // R$ 3990/ano
         },
       };
 

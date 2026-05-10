@@ -4,7 +4,31 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow
 [SemVer](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] — 2026-05-10 — Public Launch
+
+First official public release of the MaxVision LinkedIn Suite for Claude Code.
+
+### Highlights
+
+- **16 MCP tools** across Jobs, Profiles, People, Companies, Feed/Posts, Messaging, and Tracking surfaces.
+- **Apify + BrightData Web Unlocker backbone** (Mode A default). No LinkedIn cookie management required on the user side. Pivoted from Patchright direct after datacenter ASN authwall blocker.
+- **`optimize_profile` smart pipeline** — 3-layer fallback: manual text → Tavily Extract (with `isLinkedInAntiScrapePage` detector) → Apify `get_profile`. Works for any profile visibility level.
+- **License gate** via Cloudflare Worker (`license.produtoramaxvision.com.br`) — AsyncLocalStorage propagation from `X-MaxVision-License` header through to per-tool checks. Free tier open; Pro/Agency require valid license.
+- **Stripe integration** — checkout via Cloudflare Pages Function, webhook → KV license provisioning. Live mode configured.
+- **Plugin** — 8 slash commands, 4 agents (`linkedin-job-hunter`, `linkedin-resume-tailor`, `linkedin-outreach`, `linkedin-anti-detect-monitor`), 6 skills, 4 n8n workflows.
+- **Docker Swarm deploy** on VPS (arm64) with Traefik 3.4 + Let's Encrypt. Endpoint: `https://linkedin-mcp.produtoramaxvision.com.br/mcp`.
+
+### Fixed (empty Apify profile guard in `optimize_profile`)
+
+- Apify can return `SUCCEEDED` with empty `ProfileData` when the URL is genuinely non-existent. Empty `fullName` slipped through and LLM produced a generic template. Guard added: validate `profile.fullName` non-empty post-Apify; throw `EXTERNAL_API_FAIL` with actionable message if empty.
+
+### Fixed (`isLinkedInAntiScrapePage` detects auth-wall)
+
+- Extended detector to cover two flavors: LinkedIn i18n 404 page (EN/PT/ES/AR/CS/DA markers) AND the SEO auth-wall sign-up page (`seo-authwall`, `Agree & Join LinkedIn` markers). Both now trigger Apify fallback correctly.
+
+### Removed (`get_account_owner` tool)
+
+- Dropped after 4 implementation attempts (v0.13.5-9). Apify actors don't accept user cookies; LinkedIn voyager endpoints return HTML/999 from datacenter ASN. Total tools: 16 (no whoami). Account owner identification is handled at cookie capture time via `accounts.display_name`.
 
 ### Fixed (v0.13.13 — reject empty Apify profile in optimize_profile fallback)
 

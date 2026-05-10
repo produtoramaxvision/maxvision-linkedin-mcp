@@ -1,6 +1,6 @@
 # Architecture — MaxVision LinkedIn MCP
 
-Production architecture as of v0.13.13 (2026-05-10). 16 MCP tools, Apify+BD backbone, license gate via Cloudflare Worker.
+Production architecture as of v0.1.0 (2026-05-10). 16 MCP tools, Apify+BD backbone, license gate via Cloudflare Worker.
 
 ---
 
@@ -23,7 +23,7 @@ Production architecture as of v0.13.13 (2026-05-10). 16 MCP tools, Apify+BD back
 
 ## Schemas MCP — todas as 16 tools
 
-Tools shipped (v0.13.13):
+Tools shipped (v0.1.0):
 
 ### Free tier (12 tools, no license required)
 
@@ -55,9 +55,9 @@ Schemas live in `mcp-server/src/tools/schemas.ts`. Each tool exports its input s
 
 Notable schema decisions:
 
-- `JobUrlSchema` uses `z.transform` to normalize slugged URLs (`/jobs/view/some-job-slug-123/` → `/jobs/view/123/`) — lifts the requirement away from every caller (BUG 2 fix v0.13.2)
-- `accountId` defaults to `'default'`; `accounts.repo.getAccountById('default')` falls back to first active account if no row matches (BUG 1 fix v0.13.2)
-- `search_companies` input field is `searchQuery` (Apify actor expectation), not `keywords` (BUG 5 fix v0.13.3)
+- `JobUrlSchema` uses `z.transform` to normalize slugged URLs (`/jobs/view/some-job-slug-123/` → `/jobs/view/123/`) — lifts the requirement away from every caller
+- `accountId` defaults to `'default'`; `accounts.repo.getAccountById('default')` falls back to first active account if no row matches
+- `search_companies` input field is `searchQuery` (Apify actor expectation), not `keywords`
 
 ---
 
@@ -152,14 +152,14 @@ Switching modes is a single env change — no code redeploy.
 
 ## Smart pipeline — `optimize_profile`
 
-Three-layer fallback (v0.13.11-13):
+Three-layer fallback:
 
 1. **Manual `profileText`** (fastest, free) — caller pastes profile text directly
 2. **`profileUrl` + Tavily Extract** — checks `isLinkedInAntiScrapePage()` against:
    - Layer A — i18n 404 markers (EN/PT/ES/AR/CS/DA + multi-lang switcher)
    - Layer B — auth-wall markers (`Sign Up | LinkedIn`, `Agree & Join LinkedIn`, `seo-authwall`, `trk=linkedin-tc_auth-button`)
 3. **`profileUrl` + Apify fallback** — `scrapeProfile()` returns `ProfileData`; `profileDataToText()` renders to LLM-ready text
-4. **Empty Apify guard** (v0.13.13) — if Apify returns SUCCESS with empty `fullName` (URL doesn't exist), throw `EXTERNAL_API_FAIL` with actionable message
+4. **Empty Apify guard** — if Apify returns SUCCESS with empty `fullName` (URL doesn't exist), throw `EXTERNAL_API_FAIL` with actionable message
 
 Logger field `textSource: 'manual' | 'tavily' | 'apify'` for ops visibility on which path resolved each call.
 
@@ -245,7 +245,7 @@ Stripe → Worker webhook `/v1/issue` (test mode wired, live deferred to first p
 
 ## Deployment
 
-Same Docker image (`ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.13.13`) across all three modes documented in `docs/deploy-docker-swarm.md`:
+Same Docker image (`ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.1.0`) across all three modes documented in `docs/deploy-docker-swarm.md`:
 
 | Capacidade | Compose | Swarm CLI | Portainer Compose | Portainer Swarm |
 |---|---|---|---|---|

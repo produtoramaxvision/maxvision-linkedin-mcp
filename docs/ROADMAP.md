@@ -1,6 +1,6 @@
 # Roadmap — MaxVision LinkedIn MCP
 
-Sprint history + future direction. Status as of v0.13.13 (2026-05-10).
+Sprint history + future direction. Status as of v0.1.0 public launch (2026-05-10).
 
 ---
 
@@ -19,7 +19,7 @@ Sprint history + future direction. Status as of v0.13.13 (2026-05-10).
 
 Total tools: **16** (10 PLAN-A + 6 Sprint 7).
 
-Latest published version: **v0.13.13** (2026-05-09) — `optimize_profile` smart pipeline + empty Apify guard.
+Latest published version: **v0.1.0** (2026-05-10) — Public launch. 16 tools, Apify+BD backbone, Stripe live.
 
 ---
 
