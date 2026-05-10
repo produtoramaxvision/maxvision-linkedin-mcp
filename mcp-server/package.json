@@ -1,6 +1,6 @@
 {
   "name": "@maxvision/linkedin-mcp-server",
-  "version": "0.1.0",
+  "version": "0.13.13",
   "private": true,
   "type": "module",
   "engines": {

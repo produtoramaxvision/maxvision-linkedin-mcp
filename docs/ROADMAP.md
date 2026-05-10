@@ -1,279 +1,188 @@
 # Roadmap — MaxVision LinkedIn MCP
 
-Cronograma de execução das duas variantes, dividido em sprints semanais. Total: ~3 semanas úteis para v1.5 completa (Variantes A + B + tier Agency).
+Sprint history + future direction. Status as of v0.13.13 (2026-05-10).
 
 ---
 
-## Sprint 0 — Setup (1 dia)
+## Status snapshot
 
-> **Runbook detalhado:** [MARKETPLACE-CREATION-RUNBOOK.md](../MARKETPLACE-CREATION-RUNBOOK.md). O runbook é o ponto de entrada da próxima sessão Claude Code.
+| Sprint | Status | Outcome |
+|---|---|---|
+| Sprint 0 — Setup | ✅ done | Repos, DNS, CI, branch protection, GHCR, landing scaffold |
+| Sprint 1 — MCP core MVP | ✅ done | 4 tools shipped + DB + rate limit + auth |
+| Sprint 2 — Tools expansion | ✅ done | +6 tools (10 total per PLAN-A) |
+| Sprint 3 — License + multi-account | ✅ done | License gate via CF Worker + per-account cookie pool |
+| Sprint 4 — Release v1.0 | ⚠️ partial | Landing live, releases tagged, Stripe deferred |
+| Sprint 5 — n8n hybrid Variant B | ✅ done | 4 workflows + `/linkedin-setup-n8n` |
+| Sprint 6 — Polishing | ⚠️ partial | v0.13.x bug fixes done; tutorial videos pending |
+| Sprint 7 — Apify+BD backbone (NEW) | ✅ done | +6 tools (companies + activity + engagement); switch from cookie+browser to Apify Mode A default |
 
-### Objetivos
-- Repositórios criados (público + privado).
-- CI/CD básico funcionando (lint + typecheck + unit + swarm-deploy-test).
-- DNS, license server e landing waitlist no ar.
-- Conta LinkedIn sandbox criada (descartável, dados fictícios).
+Total tools: **16** (10 PLAN-A + 6 Sprint 7).
 
-### Tarefas
-
-- [ ] Criar repo público `produtoramaxvision/maxvision-linkedin-mcp`.
-- [ ] Criar repo privado `produtoramaxvision/maxvision-linkedin-mcp-pro`.
-- [ ] Importar este blueprint para o repo público (commit `docs: import blueprint v0.2`).
-- [ ] Configurar `.github/workflows/ci.yml` (lint + typecheck + unit tests + plugin-validation).
-- [ ] Configurar `.github/workflows/release.yml` (build multi-arch amd64 + arm64).
-- [ ] Configurar `.github/workflows/swarm-deploy-test.yml` (validação semanal de Swarm stack).
-- [ ] Configurar branch protection em `main` e `homolog`.
-- [ ] Criar `LICENSE` (AGPL-3.0) + `LICENSE-COMMERCIAL.md`.
-- [ ] README.md inicial com badges e visão.
-- [ ] DNS: `linkedin.maxvision.com.br` → landing (Vercel).
-- [ ] DNS: `linkedin-mcp.meuagente.api.br` → VPS (Traefik).
-- [ ] DNS: `license.linkedin.maxvision.com.br` → Cloudflare Worker.
-- [ ] Cloudflare Worker license server (`wrangler init` + endpoints `/v1/check`, `/v1/issue`, `/v1/revoke`).
-- [ ] Stripe products criados (Pro mensal/anual, Agency mensal/anual) + webhook test.
-- [ ] Landing waitlist (Next.js + Vercel) com hero + form Resend/Loops.
-- [ ] Conta LinkedIn sandbox + extração cookie `li_at` para dev.
-- [ ] Tags e labels GitHub: `bug`, `feature`, `compliance`, `docs`, `tier:free|pro|agency`.
+Latest published version: **v0.13.13** (2026-05-09) — `optimize_profile` smart pipeline + empty Apify guard.
 
 ---
 
-## Sprint 1 — MCP core MVP (3 dias)
+## Sprint 0 — Setup ✅
 
-### Objetivos
-- MCP server Node + TS rodando localmente com 4 tools.
-- Plugin Claude Code básico instalável.
-- Deploy VPS.
+Done 2026-05-08. Deliverables in `sprint0-deliverables/`:
 
-### Tarefas
+- Repos `produtoramaxvision/maxvision-linkedin-mcp` (public) + `…-mcp-pro` (private)
+- DNS: `linkedin.produtoramaxvision.com.br`, `linkedin-mcp.produtoramaxvision.com.br`, `license.linkedin.produtoramaxvision.com.br`
+- Branch protection on `main` + `homolog`
+- GitHub Actions: `ci.yml`, `release.yml`, `landing-deploy.yml`, `worker-deploy.yml`
+- Landing scaffold (CF Pages + static HTML) — LIVE at `https://linkedin.produtoramaxvision.com.br`
+- License server scaffold (CF Worker) — wired Sprint 3
 
-#### Dia 1 — Skeleton + browser pool
+Marketing items NOT done (intentional, low-priority):
 
-- [ ] `mcp-server/` com `package.json`, `tsconfig.json`, `vitest.config.ts`.
-- [ ] Estrutura `src/{tools,browser,cache,auth,server}.ts`.
-- [ ] Hono HTTP server + MCP SDK stdio dual mode.
-- [ ] BrowserPool com Patchright (single account).
-- [ ] Postgres migrations (script `scripts/migrate.ts`).
-- [ ] Health check endpoint `/health`.
-
-#### Dia 2 — 4 tools básicas
-
-- [ ] `search_jobs` (LinkedIn via Patchright + JobSpy via Python subprocess).
-- [ ] `get_profile` (Patchright scraping).
-- [ ] `get_job_details`.
-- [ ] `track_application`.
-- [ ] Schemas Zod completos.
-- [ ] Unit tests Vitest com mocks.
-
-#### Dia 3 — Plugin + deploy
-
-- [ ] `plugins/linkedin-maxvision/plugin.json`.
-- [ ] Skills: `linkedin-job-search`, `linkedin-resume-tailor`.
-- [ ] Subagent: `linkedin-job-hunter` (markdown).
-- [ ] Commands: `/linkedin-scan`.
-- [ ] **Validar imagem Docker** (`mcp-server/docker/Dockerfile` já existe no blueprint — só ajustar paths se houver mudança).
-- [ ] **Subir via Compose local** (`docker compose up -d`) — primeiro modo a validar.
-- [ ] **Subir via Swarm single-node** (`docker stack deploy -c docker-stack.yml maxv-test`) — segundo modo.
-- [ ] **Subir via Portainer Stack** (Compose ou Swarm conforme cluster cliente) — terceiro modo.
-- [ ] Smoke test E2E real (busca 5 vagas, retorna ao Claude Code) nos três modos.
-- [ ] Documentar gotchas em `docs/deploy-docker-swarm.md` (extender o existente).
-
-### Saída
-
-Cliente roda no Claude Code:
-```
-/plugin install ./plugins/linkedin-maxvision
-/linkedin-scan "Senior Backend Python remoto"
-```
-e recebe lista de vagas formatada.
+- Stripe products + live mode (deferred; activate when first paying customer signs up)
+- Vídeo demo + LinkedIn announcement post + awesome-* submissions
 
 ---
 
-## Sprint 2 — Tools restantes + apply_easy (3 dias)
+## Sprint 1 — MCP core MVP ✅
 
-### Objetivos
-- Cobertura completa das 10 tools.
-- Apply flow com `confirm_required` funcionando.
-- Tests Playwright em conta sandbox.
+Done 2026-05-08. Tools shipped: `search_jobs`, `get_profile`, `get_job_details`, `track_application`. Stack: Node 20 + TS strict + Hono + `@modelcontextprotocol/sdk` + Patchright + Drizzle/Postgres + ioredis. Multi-stage Dockerfile (Node + Python venv + Patchright Chromium).
 
-### Tarefas
-
-#### Dia 4
-
-- [ ] `apply_easy` — fluxo preview/submit com screenshot.
-- [ ] `send_message` — fluxo draft/confirm.
-- [ ] Migration: `applications`, `messages_drafts`.
-
-#### Dia 5
-
-- [ ] `optimize_profile` (chama Claude API internamente para análise).
-- [ ] `list_feed`.
-- [ ] `post_update`.
-- [ ] `search_people`.
-
-#### Dia 6
-
-- [ ] Skills correspondentes no plugin (`linkedin-easy-apply`, `linkedin-outreach`, `linkedin-feed-engagement`, `linkedin-profile-optimize`).
-- [ ] Commands: `/linkedin-apply`, `/linkedin-tailor`, `/linkedin-audit`.
-- [ ] Tests Playwright E2E em conta sandbox (apply em vaga teste, send msg para conta secundária).
-- [ ] Documentar troubleshooting (`docs/troubleshooting.md`).
-
-### Saída
-
-Cliente faz fluxo completo:
-```
-/linkedin-scan ... → escolhe vaga
-@linkedin-job-hunter aplica nessa, customiza resume
-→ subagent retorna sumário com application_id e screenshot
-```
+Build sequence detail: see `docs/historical/sprint1-PLAN.md` (archived).
 
 ---
 
-## Sprint 3 — Multi-account + license gating (2 dias)
+## Sprint 2 — Tools expansion ✅
 
-### Objetivos
-- Cookie rotation multi-conta.
-- License key validation (free vs Pro).
-
-### Tarefas
-
-#### Dia 7
-
-- [ ] `account_id` parameter em todas as tools.
-- [ ] BrowserPool com map de contexts por account.
-- [ ] Encrypted cookie storage (`secrets/cookies.enc` + master key via env).
-- [ ] CLI: `mcp-cli account add <id> --cookie-from-file=cookie.txt`.
-- [ ] Health check periódico (node-cron) + alert via webhook.
-
-#### Dia 8
-
-- [ ] Cloudflare Worker `license.linkedin.maxvision.com.br/v1/check`.
-- [ ] Stripe webhook → Worker emite license key.
-- [ ] MCP server: middleware `requires_pro` em tools `apply_easy`, `send_message`, `search_people`.
-- [ ] Plugin: skills tier Pro só carregam se license válida.
-- [ ] Docs: como obter/renovar license key.
-
-### Saída
-
-Free: `search_jobs`, `get_profile`, `tailor_resume`, `optimize_profile`, `list_feed`, `post_update` (1 conta).
-Pro: + `apply_easy`, `send_message`, `search_people`, `multi-account` (até 3).
-Agency: + multi-account ilimitado, Sales Navigator, white-label.
+Done 2026-05-08. Added: `apply_easy`, `send_message`, `optimize_profile`, `list_feed`, `post_update`, `search_people`. Hard `confirm_required=true` default on write tools (apply/message/post). Drizzle migrations for `applications`, `messages_drafts`.
 
 ---
 
-## Sprint 4 — Release v1.0 free + Pro (2 dias)
+## Sprint 3 — License + multi-account ✅
 
-### Objetivos
-- Release público v1.0.
-- Landing page funcional.
-- Stripe checkout ativo.
+Done 2026-05-09. License gate via Cloudflare Worker at `license.linkedin.produtoramaxvision.com.br`. AsyncLocalStorage propagates `X-MaxVision-License` header from `/mcp` POST to tool handlers via `getRequestContext()`. Pro tools (`apply_easy`, `send_message`, `post_update`, `search_people`) gated.
 
-### Tarefas
-
-#### Dia 9
-
-- [ ] Landing page (Next.js + Tailwind + shadcn) em `linkedin.maxvision.com.br`.
-- [ ] Página `/install` com instruções passo-a-passo.
-- [ ] Página `/pricing` com Stripe Checkout integrado.
-- [ ] CHANGELOG.md.
-- [ ] Release `v1.0.0` no GitHub com binaries Docker em GHCR.
-
-#### Dia 10
-
-- [ ] Vídeo demo de 3 minutos (busca + apply).
-- [ ] Post no LinkedIn anunciando o produto.
-- [ ] Submissão a `awesome-claude-code` e `awesome-mcp-servers`.
-- [ ] Coleta primeiros feedbacks (5 beta users).
-
-### Saída
-
-**Release v1.0** — Variante A standalone, free + Pro funcionais. Pronto para vendas.
+Multi-account: per-account cookie pool (Mode B), `/linkedin-cookie-refresh` capture flow ships fresh cookies via `POST /admin/account-cookie` (encrypted AES-256-GCM at rest in `accounts.cookie_encrypted`).
 
 ---
 
-## Sprint 5 — Variante B (n8n híbrida) (5 dias)
+## Sprint 4 — Release v1.0 ⚠️ partial
 
-### Objetivos
-- Endpoints webhook no MCP.
-- 4 workflows n8n.
-- Tier Agency com multi-tenant.
+Done:
 
-### Tarefas
+- Landing page LIVE (CF Pages)
+- CHANGELOG.md maintained
+- Releases tagged through v0.13.1 (older tags v0.13.2-v0.13.13 not backfilled — current = `homolog`/`main` HEAD `0b6d515` + onwards)
+- License server live (CF Worker)
+- License-deploy-checklist.md drafted
 
-#### Dia 11 — Webhooks no MCP
+Pending (low priority):
 
-- [ ] Endpoints `/webhooks/job-found`, `/webhooks/recruiter-msg`.
-- [ ] SSE endpoint `/events` para n8n consumir.
-- [ ] Tests integração n8n local (Docker).
-
-#### Dia 12-13 — Workflows n8n
-
-- [ ] `linkedin-daily-scan.json`.
-- [ ] `linkedin-batch-apply.json`.
-- [ ] `linkedin-recruiter-reply.json`.
-- [ ] `linkedin-profile-weekly-audit.json`.
-- [ ] Templates de credentials.
-- [ ] Testes em n8n MaxVision (`n8n.meuagente.api.br`).
-
-#### Dia 14 — Setup automation
-
-- [ ] Comando `/linkedin-setup-n8n --instance ... --api-key ...`.
-- [ ] Importação automática via n8n REST API.
-- [ ] Documentação setup tier Pro com n8n (`docs/setup-hybrid-n8n.md`).
-
-#### Dia 15 — Tier Agency
-
-- [ ] Workflow `linkedin-multi-account-pool.json`.
-- [ ] Workflow `linkedin-team-sync.json`.
-- [ ] White-label config (logo, cores, dominio próprio do cliente Agency).
-- [ ] Stripe pricing tier Agency.
-
-### Saída
-
-**Release v1.5** — Variante B completa. Pro pode escolher A ou B. Agency obrigatório B.
+- Stripe products in live mode (test mode wired; switch when paying customer)
+- Vídeo demo 3min
+- Post anúncio LinkedIn
+- Submissões a awesome-claude-code, awesome-mcp-servers, Smithery.ai, Glama.ai, MCP.so
 
 ---
 
-## Sprint 6 — Polimento + estabilização (2 dias)
+## Sprint 5 — n8n hybrid Variant B ✅
 
-### Tarefas
+Done. Workflows in `plugins/linkedin-maxvision/n8n-workflows/`:
 
-- [ ] Bug fixes do feedback dos beta users.
-- [ ] Otimização de queries Postgres (índices que faltam).
-- [ ] Anti-detect tuning (analisar logs de captcha).
-- [ ] Documentação completa (API ref, troubleshooting expandido).
-- [ ] Vídeos tutorial: setup, primeiro apply, profile audit, n8n integration.
-- [ ] Release v1.5.1.
+- `linkedin-daily-scan.json` — cron-triggered job scan + Telegram alert
+- `linkedin-batch-apply.json` — webhook-triggered batch Easy Apply
+- `linkedin-recruiter-reply.json` — DM auto-reply with human approval gate
+- `linkedin-profile-weekly-audit.json` — weekly audit + digest
+
+Setup automation: `/linkedin-setup-n8n --instance ... --api-key ...` (Pro tier).
+
+Webhook endpoints in `mcp-server/src/http.ts`: `POST /webhooks/job-found`, `POST /webhooks/recruiter-msg`, `GET /events` (SSE). Authenticated via `WEBHOOK_SECRET` env.
+
+Agency-tier workflows (`linkedin-multi-account-pool`, `linkedin-team-sync`) DEFERRED — no Agency customer to date.
+
+---
+
+## Sprint 6 — Polishing ⚠️ partial
+
+Done:
+
+- v0.13.x bug-fix cycle (BUG 1-5 from prior validation, default accountId, URL transform, license, URN encoding, search_companies field name)
+- `list_applications` tool added (Sprint 1.5 close-out)
+- `optimize_profile` smart pipeline (v0.13.11-13) — Tavily → Apify fallback with auth-wall + empty-profile guards
+- Apify FREE limit detection with upgrade hint
+- Easy Apply DOM selector i18n expansion (PT/IT/ES/FR/DE)
+- `get_account_owner` 4 attempts → DROPPED (voyager API HTML response from datacenter ASN; Apify actors don't accept user cookies — confirmed via input-schema docs)
+
+Pending:
+
+- Tutorial videos (setup, primeiro apply, profile audit, n8n integration)
+- Anti-detect tuning based on captcha logs (no captchas observed in 30d via Apify backbone)
+- Performance: index audit on Postgres queries
+
+---
+
+## Sprint 7 — Apify+BD backbone (NEW, post-PLAN-A) ✅
+
+Done 2026-05-09. Pivot reason: Patchright on flagged datacenter ASN hits LinkedIn authwall on protected pages (`/in/`, `/feed/`, `/search/people`). Switched default backend to **Apify harvestapi actors + BrightData Web Unlocker proxy** for Patchright fallback (Mode A in `docs/install-modes.md`).
+
+New tools (6):
+
+- `get_company_info` — `harvestapi/linkedin-company-detail`
+- `search_companies` — `harvestapi/linkedin-company-search` (`searchQuery` + flatten helpers for industry/locations/size)
+- `find_company_employees` — Apify with URN case preservation (BUG 4 fix v0.13.2)
+- `get_profile_activity` — recent posts + reactions for warm-lead signals
+- `monitor_post_engagement` — reactions + comments for engagement insights
+- `list_applications` — local DB read paired with `track_application`
+
+Backbone changes:
+
+- `src/scrapers/apify-helper.ts` — async `/runs` flow + `statusMessage` parsing (FREE limit detection)
+- `PATCHRIGHT_PROXY_URL` env wired to `chromium.launch({ proxy: ... })` for BD Unlocker passthrough
+- `docs/install-modes.md` documents A (Apify) vs B (cookie+browser) vs C (hybrid)
+
+Total tools: 10 (PLAN-A) + 6 (Sprint 7) = **16 LIVE**.
+
+---
+
+## Next steps (no committed sprint)
+
+Bug fixes + ops as needed. No major feature push planned. Marketing items (Sprint 4 pending) become priority once a paying customer signs up.
+
+Possible future sprints (not committed):
+
+- **Sprint 8 — Companion daemon** (per `docs/tunnel-architectures.md` Option B) — local Patchright runner on user's IP, eliminates BD Unlocker dependency for Pro tier
+- **Sprint 9 — Stripe live mode + email automation** — Resend/Loops integration for license key delivery; auto-renewal via webhook `invoice.paid`
+- **Sprint 10 — Marketing kickoff** — vídeo demo, awesome-* submissions, LinkedIn announcement, beta user case studies
+
+---
+
+## Backlog post-v1.0
+
+- **v2.0:** Cloud-hosted MCP for clients without VPS (multi-tenant isolation via license key)
+- **v2.1:** VSCode extension wrapping the same MCP
+- **v2.2:** `maxvision-twitter-suite` (X/Twitter automation, same architectural pattern)
+- **v2.3:** `maxvision-instagram-suite`
+- **v3.0:** Standalone web dashboard (no Claude Code dependency)
+
+---
+
+## Risks + mitigations
+
+| Risk | Probability | Mitigation |
+|---|---|---|
+| Apify actor breaking change | Medium | Multiple actors per surface; quick swap via `APIFY_LINKEDIN_*_ACTOR` env |
+| BD Unlocker cost spike | Low | Per-request cost capped via `maxTotalChargeUsd`; fallback to Mode B for high-volume tenants |
+| LinkedIn DOM change (Mode B residual) | Medium | Mode A bypass; Mode B selector fallbacks `[data-test=...] OR [aria-label=...] OR :has-text(...)` |
+| Cookie expiration mid-session (Mode B/C) | Medium | Health check + `/linkedin-cookie-refresh` capture flow; alert via webhook |
+| LinkedIn ToS enforcement against MaxVision | Low | Disclaimer in landing + setup; product framed as personal assistant for own account; rate-limited per humanlike patterns |
+| License server outage | Low | License cached 1h in `license_cache` table; fail-open during outage with warn log |
+| Apify FREE plan limit silent throttle | Low | `apify-helper.ts` parses `statusMessage` for "free user run limit"; throws `UPSTREAM_FAIL` with upgrade hint |
 
 ---
 
 ## Marcos / Gates
 
-| Marco | Critério de aceite | Sprint |
+| Marco | Critério | Status |
 |---|---|---|
-| **MVP interno** | Buscar vaga + retornar lista no Claude Code | Sprint 1 |
-| **Beta privado** | 10 tools funcionando, 5 beta users | Sprint 4 |
-| **Public release v1.0** | Landing + Stripe + 1ª venda | Sprint 4 |
-| **v1.5 (Agency)** | n8n workflows + multi-tenant | Sprint 5 |
-| **Estabilização** | <1% crash rate, <5% captcha rate | Sprint 6 |
-
----
-
-## Backlog pós-v1.5
-
-- **v2.0:** Cloud-hosted MCP (MaxVision hospeda para clientes que não querem VPS).
-- **v2.1:** Plugin VSCode separado (mesma base MCP).
-- **v2.2:** Twitter/X Suite (mesmo padrão arquitetural).
-- **v2.3:** Instagram Suite.
-- **v3.0:** Dashboard web standalone (sem dependência de Claude Code).
-
----
-
-## Riscos e mitigações
-
-| Risco | Probabilidade | Mitigação |
-|---|---|---|
-| LinkedIn quebra seletores DOM | Alta | Tests Playwright diários; canary release; resiliência por seletores múltiplos. |
-| Conta sandbox banida | Alta | 3 contas backup; conta principal só para health check. |
-| Stripe pricing rejeitado | Baixa | Pesquisa de mercado pré-launch (5 entrevistas). |
-| Concorrente lança grátis | Média | Foco em UX + integrações premium (n8n + Telegram + Notion); moat = ecossistema MaxVision. |
-| ToS LinkedIn endurece | Alta | Disclaimer claro no setup; modo "manual review" como default; auditoria legal antes de v2.0 cloud-hosted. |
-| Bug crítico em apply | Alta | `confirm_required=true` default; rollback feature flag rápido. |
+| **MVP interno** | Buscar vaga + retornar lista no Claude Code | ✅ Sprint 1 |
+| **Beta privado** | 16 tools funcionando | ✅ Sprint 7 |
+| **Public release v1.0** | Landing + Stripe live + 1ª venda | ⚠️ Stripe deferred |
+| **v1.5 (Agency)** | n8n workflows multi-tenant | ⚠️ partial (Pro workflows done; Agency deferred) |
+| **Estabilização** | <1% crash rate, <5% captcha rate | ✅ (Apify backbone = ~0% captcha) |

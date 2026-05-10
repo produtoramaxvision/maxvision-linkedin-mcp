@@ -188,13 +188,23 @@ This is the path of least resistance and matches the v0.3.0 ship reality.
 
 ---
 
-## What we ship NOW (v0.3.0+)
+## What we ship NOW (v0.13.13, Sprint 7+)
 
-- `mcp-server/src/browser/scraping-backend.ts` — abstraction layer with
-  Scrapfly fetch + BrightData config + Patchright passthrough.
-- `SCRAPING_BACKEND` env switches the path.
-- Tool layer (Sprint 6.2) reads the backend and either calls
-  `browserPool.acquire` (patchright) or `scrape()` (scrapfly).
+**Mode A (Apify + BrightData Web Unlocker) is the default and recommended
+backend.** See `docs/install-modes.md` for full env setup.
+
+- `mcp-server/src/scrapers/apify-helper.ts` — async `/runs` flow with
+  `statusMessage` parsing for FREE-tier silent throttle detection.
+- `harvestapi/linkedin-profile-scraper` for `get_profile`,
+  `harvestapi/linkedin-profile-search` for `search_people`,
+  `harvestapi/linkedin-company-detail|search` for company tools.
+- BrightData Web Unlocker via `PATCHRIGHT_PROXY_URL` for Patchright surfaces
+  (`search_jobs`, `get_job_details`) — handles auth + CAPTCHA + JS render at
+  proxy layer.
+- Tavily Extract (`TAVILY_API_KEY`) wired into `optimize_profile` smart
+  pipeline (Tavily first → Apify fallback on auth-wall/404).
+- Scrapfly was evaluated (Option A above) but **never shipped** — Apify
+  proved cheaper + better LinkedIn-specific via specialized actors.
 
 ---
 

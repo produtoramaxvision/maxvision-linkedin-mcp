@@ -1,6 +1,6 @@
 # Architecture — MaxVision LinkedIn MCP
 
-Documento técnico unificado das duas variantes (A e B). Schemas, decisões de design, contratos de API.
+Production architecture as of v0.13.13 (2026-05-10). 16 MCP tools, Apify+BD backbone, license gate via Cloudflare Worker.
 
 ---
 
@@ -8,543 +8,256 @@ Documento técnico unificado das duas variantes (A e B). Schemas, decisões de d
 
 | Camada | Responsabilidade | Tecnologia |
 |---|---|---|
-| **Cliente** | Conversação, comandos, skills | Claude Code (CLI/Desktop) + plugin `linkedin-maxvision` |
-| **Transporte** | MCP stdio (local) ou HTTP/SSE (remoto) | `@modelcontextprotocol/sdk` + Hono |
-| **Core** | Tools MCP, browser pool, fontes LinkedIn, cache | Node 20 + TS + Patchright + Python subprocess |
-| **Persistência** | Cache, tracking, sessions | Postgres 16 + Redis 7 |
-| **Orquestração** (apenas Variante B) | Cron, batch, notify, tracking visual | n8n |
-| **License** | Validação tier Pro/Agency | Cloudflare Worker + Stripe webhook |
+| **Cliente** | Conversação, comandos, skills, agentes | Claude Code + plugin `linkedin-maxvision` |
+| **Transporte** | MCP Streamable HTTP (stateless) | `@modelcontextprotocol/sdk` 1.29 + Hono |
+| **Tools** | 16 tools com instrumentation, license gate, rate limit | `src/tools/*.ts` |
+| **Scrapers** | Apify harvestapi actors + Tavily Extract + Patchright local | `src/scrapers/*.ts` |
+| **Browser** | Patchright pool com BD Web Unlocker proxy (Mode B/C) | `src/browser/pool.ts` |
+| **Persistência** | Drizzle + Postgres (cache, accounts, applications, audit) | `src/db/{schema,client,repos}.ts` |
+| **Rate limit** | Token bucket por accountId + action | Redis via ioredis |
+| **Auth** | API key + license header (AsyncLocalStorage propagation) | `src/auth/{api-key,license,request-context,cookies}.ts` |
+| **Orquestração** (Variant B) | Cron, batch, notify, tracking visual | n8n + 4 workflows |
+| **License** | Validação tier Pro/Agency | Cloudflare Worker + KV + Stripe webhook |
 
 ---
 
-## Schemas MCP — todas as 10 tools
+## Schemas MCP — todas as 16 tools
 
-### Tipos compartilhados
+Tools shipped (v0.13.13):
+
+### Free tier (12 tools, no license required)
+
+| Tool | Description | Backend |
+|---|---|---|
+| `search_jobs` | LinkedIn + JobSpy aggregator | Patchright + BD Unlocker (guest layout, no auth) |
+| `get_job_details` | Single job by URL | Patchright + BD Unlocker |
+| `get_profile` | LinkedIn profile by URL/slug | Apify `harvestapi/linkedin-profile-scraper` |
+| `get_profile_activity` | Recent posts + reactions | Apify |
+| `optimize_profile` | LLM analysis vs target role | Smart pipeline: manual text → Tavily Extract → Apify fallback → Claude/Gemini via OpenRouter |
+| `list_feed` | Recent items from home feed | Apify post-search-scraper |
+| `get_company_info` | Company details | Apify `harvestapi/linkedin-company-detail` |
+| `search_companies` | Company filter search | Apify `harvestapi/linkedin-company-search` |
+| `find_company_employees` | Employees by company | Apify (with URN case preservation) |
+| `monitor_post_engagement` | Reactions + comments | Apify |
+| `track_application` | DB-backed application tracker | Postgres (local) |
+| `list_applications` | List tracked applications | Postgres (local) |
+
+### Pro tier (4 tools, require `MAXVISION_LICENSE`)
+
+| Tool | Description | Confirm gate |
+|---|---|---|
+| `apply_easy` | Submit Easy Apply | `confirm=false` returns preview; `confirm=true` submits |
+| `send_message` | DM/InMail | `confirm=false` returns preview; `confirm=true` sends |
+| `post_update` | Create feed post | `confirm=false` returns preview; `confirm=true` publishes |
+| `search_people` | Filter people search | (no confirm — read tool) |
+
+Schemas live in `mcp-server/src/tools/schemas.ts`. Each tool exports its input shape (raw Zod object for `server.registerTool`) and the parsed input schema (with `.transform()` for URL normalization, etc.).
+
+Notable schema decisions:
+
+- `JobUrlSchema` uses `z.transform` to normalize slugged URLs (`/jobs/view/some-job-slug-123/` → `/jobs/view/123/`) — lifts the requirement away from every caller (BUG 2 fix v0.13.2)
+- `accountId` defaults to `'default'`; `accounts.repo.getAccountById('default')` falls back to first active account if no row matches (BUG 1 fix v0.13.2)
+- `search_companies` input field is `searchQuery` (Apify actor expectation), not `keywords` (BUG 5 fix v0.13.3)
+
+---
+
+## Schema Postgres (Drizzle)
+
+Source-of-truth: `mcp-server/src/db/schema.ts`. Migrations apply via `drizzle-orm/node-postgres/migrator` on startup with retry-with-backoff (Postgres may not be ready in Swarm v3.9 — `depends_on` doesn't gate this).
+
+Tables:
+
+- `accounts` — id, display_name, cookie_encrypted (BYTEA), cookie_expires_at, status (active/paused/banned), rate_limit_bucket (JSONB)
+- `jobs_cache` — payload (JSONB), expires_at
+- `profiles_cache` — payload, expires_at
+- `applications` — job_url, account_id (FK), status, history (JSONB array, append via `||`)
+- `messages_drafts` — recipient_url, body, status (draft/sent/rejected), sent_at
+- `rate_limit_events` — append-only log paralelo ao Redis bucket (forensics)
+- `captcha_events` — health check writes here when status != ok
+- `license_cache` — key_hash (SHA-256), tier, features, expires_at — 1h TTL
+- `audit_log` — tool, account_id, input_hash (SHA-256[:32]), output_hash, success, latency_ms, error_msg
+
+LGPD: `audit_log` never stores raw input/output — only hashes for forensic queries scoped by tool + account + time.
+
+---
+
+## Tool instrumentation — `withInstrumentation`
+
+Every tool is wrapped by `withInstrumentation` in `src/tools/_base.ts`:
+
+1. **Validate** — Zod re-parse (idempotent — SDK pre-parses raw shape; defensive parse here gives a single validation point)
+2. **License gate** — `gateToolByLicense(tool.name, reqCtx.licenseKey)` — noop when `LICENSE_CHECK_ENABLED=false`; Pro tools 401 without valid `X-MaxVision-License` header
+3. **Rate limit gate** — `checkRateLimit(accountId, tool.name)` via Redis token bucket (per action `search`/`profile`/`apply`/`message`/`post`/`feed_scroll`)
+4. **Execute** — handler runs; latency captured via `performance.now()`
+5. **Audit** — fire-and-forget `INSERT INTO audit_log` with hashes; failures logged at warn (must not break tool response)
+6. **Error envelope** — thrown errors mapped to MCP `CallToolResult` `{ isError: true, content: [{ type: 'text', text: JSON.stringify({ error: { code, message } }) }] }`
+
+License key propagated from HTTP layer to handler via AsyncLocalStorage:
 
 ```typescript
-const JobSchema = z.object({
-  id: z.string(),
-  source: z.enum(["linkedin", "indeed", "glassdoor", "ziprecruiter"]),
-  url: z.string().url(),
-  title: z.string(),
-  company: z.object({
-    name: z.string(),
-    url: z.string().url().optional(),
-    logo: z.string().url().optional()
-  }),
-  location: z.string(),
-  remote_type: z.enum(["remote", "hybrid", "onsite", "unknown"]),
-  posted_at: z.string().datetime(),
-  applicants_count: z.number().optional(),
-  salary: z.object({
-    min: z.number().optional(),
-    max: z.number().optional(),
-    currency: z.string().default("USD"),
-    period: z.enum(["hour", "month", "year"]).optional()
-  }).optional(),
-  description: z.string(),
-  easy_apply: z.boolean(),
-  match_score: z.number().min(0).max(1).optional()
+// src/http.ts
+return withRequestContext({ licenseKey }, async () => {
+  // ... mcp.connect + transport.handleRequest
 });
 
-const ProfileSchema = z.object({
-  public_id: z.string(),
-  url: z.string().url(),
-  full_name: z.string(),
-  headline: z.string().optional(),
-  location: z.string().optional(),
-  summary: z.string().optional(),
-  experience: z.array(z.object({
-    title: z.string(),
-    company: z.string(),
-    start_date: z.string(),
-    end_date: z.string().nullable(),
-    description: z.string().optional()
-  })),
-  education: z.array(z.object({
-    school: z.string(),
-    degree: z.string().optional(),
-    field: z.string().optional(),
-    start_year: z.number().optional(),
-    end_year: z.number().optional()
-  })),
-  skills: z.array(z.string()),
-  followers: z.number().optional()
-});
-```
-
-### Tools (10)
-
-#### 1. `search_jobs`
-```typescript
-{
-  inputSchema: z.object({
-    keywords: z.string(),
-    location: z.string().optional(),
-    remote: z.enum(["any", "remote", "hybrid", "onsite"]).default("any"),
-    experience: z.array(z.enum(["internship", "entry", "associate", "mid-senior", "director", "executive"])).optional(),
-    posted_within_hours: z.number().int().min(1).max(720).default(168),
-    salary_min: z.number().optional(),
-    sources: z.array(z.enum(["linkedin", "indeed", "glassdoor", "ziprecruiter"])).default(["linkedin"]),
-    limit: z.number().int().min(1).max(100).default(25),
-    easy_apply_only: z.boolean().default(false),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.array(JobSchema)
-}
-```
-
-#### 2. `get_job_details`
-```typescript
-{
-  inputSchema: z.object({
-    job_url: z.string().url(),
-    include_applicants_demo: z.boolean().default(false)
-  }),
-  outputSchema: JobSchema.extend({
-    full_description_html: z.string(),
-    requirements: z.array(z.string()),
-    benefits: z.array(z.string()),
-    hiring_team: z.array(ProfileSchema.partial()).optional()
-  })
-}
-```
-
-#### 3. `apply_easy`
-```typescript
-{
-  inputSchema: z.object({
-    job_url: z.string().url(),
-    resume_path: z.string().describe("Caminho local de resume PDF/DOCX"),
-    cover_letter: z.string().optional(),
-    answers: z.record(z.string()).optional().describe("Respostas a perguntas custom da vaga"),
-    confirm_required: z.boolean().default(true).describe("Se true, retorna preview e exige segunda chamada com confirm=true"),
-    confirm: z.boolean().default(false),
-    application_id: z.string().optional().describe("Para retomar com confirm após preview"),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.object({
-    status: z.enum(["preview", "submitted", "needs_review", "blocked", "failed"]),
-    application_id: z.string(),
-    preview: z.object({
-      questions_answered: z.record(z.string()),
-      resume_used: z.string(),
-      screenshot_path: z.string()
-    }).optional(),
-    error: z.string().optional()
-  })
-}
-```
-
-#### 4. `get_profile`
-```typescript
-{
-  inputSchema: z.object({
-    profile_url: z.string().url().optional(),
-    public_id: z.string().optional(),
-    include: z.array(z.enum(["experience", "education", "skills", "recommendations", "activity", "contact"])).default(["experience", "education", "skills"]),
-    account_id: z.string().default("default")
-  }).refine(d => d.profile_url || d.public_id, "profile_url ou public_id obrigatório"),
-  outputSchema: ProfileSchema
-}
-```
-
-#### 5. `search_people`
-```typescript
-{
-  inputSchema: z.object({
-    keywords: z.string().optional(),
-    company: z.string().optional(),
-    title: z.string().optional(),
-    location: z.string().optional(),
-    school: z.string().optional(),
-    industry: z.string().optional(),
-    connection_degree: z.array(z.enum(["1", "2", "3"])).optional(),
-    limit: z.number().int().min(1).max(100).default(25),
-    use_sales_navigator: z.boolean().default(false).describe("Requer tier Pro+"),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.array(ProfileSchema.partial())
-}
-```
-
-#### 6. `send_message` (com aprovação obrigatória)
-```typescript
-{
-  inputSchema: z.object({
-    recipient_url: z.string().url(),
-    body: z.string().max(1900),
-    confirm: z.boolean().default(false),
-    draft_id: z.string().optional(),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.object({
-    status: z.enum(["draft_created", "sent", "blocked", "failed"]),
-    draft_id: z.string().optional(),
-    preview: z.object({
-      recipient: ProfileSchema.partial(),
-      body: z.string(),
-      conversation_url: z.string().url().optional()
-    }).optional(),
-    sent_at: z.string().datetime().optional()
-  })
-}
-```
-
-#### 7. `optimize_profile`
-```typescript
-{
-  inputSchema: z.object({
-    profile_url: z.string().url().optional().describe("Default: perfil próprio da conta autenticada"),
-    target_roles: z.array(z.string()).optional().describe("Vagas-alvo para keyword density"),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.object({
-    score: z.object({
-      overall: z.number().min(0).max(100),
-      headline: z.number(),
-      summary: z.number(),
-      experience: z.number(),
-      skills: z.number(),
-      activity: z.number(),
-      featured: z.number()
-    }),
-    suggestions: z.array(z.object({
-      area: z.string(),
-      severity: z.enum(["low", "medium", "high"]),
-      current: z.string().optional(),
-      suggested: z.string(),
-      rationale: z.string()
-    })),
-    keyword_gaps: z.array(z.object({
-      keyword: z.string(),
-      relevance: z.number(),
-      where_to_add: z.array(z.string())
-    }))
-  })
-}
-```
-
-#### 8. `list_feed`
-```typescript
-{
-  inputSchema: z.object({
-    feed_type: z.enum(["home", "following", "company", "hashtag"]).default("home"),
-    target: z.string().optional().describe("Company URL ou hashtag se feed_type != home"),
-    limit: z.number().int().min(1).max(50).default(20),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.array(z.object({
-    post_id: z.string(),
-    url: z.string().url(),
-    author: ProfileSchema.partial(),
-    posted_at: z.string().datetime(),
-    body: z.string(),
-    media: z.array(z.object({ type: z.string(), url: z.string() })).optional(),
-    reactions: z.number(),
-    comments: z.number(),
-    reposts: z.number()
-  }))
-}
-```
-
-#### 9. `post_update`
-```typescript
-{
-  inputSchema: z.object({
-    body: z.string().max(3000),
-    media_paths: z.array(z.string()).optional(),
-    visibility: z.enum(["public", "connections", "group"]).default("public"),
-    group_id: z.string().optional(),
-    confirm: z.boolean().default(false),
-    draft_id: z.string().optional(),
-    account_id: z.string().default("default")
-  }),
-  outputSchema: z.object({
-    status: z.enum(["draft_created", "posted", "failed"]),
-    post_url: z.string().url().optional(),
-    draft_id: z.string().optional()
-  })
-}
-```
-
-#### 10. `track_application`
-```typescript
-{
-  inputSchema: z.object({
-    job_url: z.string().url(),
-    application_id: z.string(),
-    status: z.enum(["submitted", "viewed", "rejected", "interview", "offer", "withdrawn"]),
-    notes: z.string().optional()
-  }),
-  outputSchema: z.object({
-    tracking_id: z.string(),
-    history: z.array(z.object({
-      status: z.string(),
-      at: z.string().datetime(),
-      notes: z.string().optional()
-    }))
-  })
-}
+// src/tools/_base.ts
+const reqCtx = getRequestContext();
+const deny = await gateToolByLicense(tool.name, reqCtx.licenseKey);
 ```
 
 ---
 
-## Schema Postgres
+## Backbone strategy — Apify + BrightData
 
-```sql
-CREATE TABLE accounts (
-  id TEXT PRIMARY KEY,
-  display_name TEXT NOT NULL,
-  cookie_encrypted BYTEA NOT NULL,
-  cookie_expires_at TIMESTAMPTZ NOT NULL,
-  rate_limit_bucket JSONB NOT NULL DEFAULT '{}',
-  last_used_at TIMESTAMPTZ,
-  status TEXT CHECK (status IN ('active', 'paused', 'banned')) DEFAULT 'active',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+Pivot from cookie+browser-only (Mode B) to **Apify Mode A default** in Sprint 7 after empirical authwall on flagged datacenter ASN. Three modes documented in `docs/install-modes.md`:
 
-CREATE TABLE jobs_cache (
-  id TEXT PRIMARY KEY,
-  source TEXT NOT NULL,
-  url TEXT UNIQUE NOT NULL,
-  payload JSONB NOT NULL,
-  match_score REAL,
-  fetched_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ
-);
+### Mode A — Apify (default, recommended)
 
-CREATE INDEX idx_jobs_fetched ON jobs_cache (fetched_at DESC);
-CREATE INDEX idx_jobs_source ON jobs_cache (source);
+Stack envs:
 
-CREATE TABLE profiles_cache (
-  public_id TEXT PRIMARY KEY,
-  url TEXT UNIQUE NOT NULL,
-  payload JSONB NOT NULL,
-  fetched_at TIMESTAMPTZ DEFAULT NOW(),
-  expires_at TIMESTAMPTZ
-);
-
-CREATE TABLE applications (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id TEXT REFERENCES accounts(id),
-  job_url TEXT NOT NULL,
-  job_title TEXT,
-  company TEXT,
-  status TEXT NOT NULL,
-  resume_used TEXT,
-  cover_letter TEXT,
-  answers JSONB,
-  screenshot_path TEXT,
-  submitted_at TIMESTAMPTZ DEFAULT NOW(),
-  history JSONB DEFAULT '[]'::jsonb
-);
-
-CREATE INDEX idx_applications_account ON applications (account_id, submitted_at DESC);
-
-CREATE TABLE messages_drafts (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  account_id TEXT REFERENCES accounts(id),
-  recipient_url TEXT NOT NULL,
-  body TEXT NOT NULL,
-  status TEXT CHECK (status IN ('draft', 'sent', 'rejected')) DEFAULT 'draft',
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  sent_at TIMESTAMPTZ
-);
-
-CREATE TABLE rate_limit_events (
-  id BIGSERIAL PRIMARY KEY,
-  account_id TEXT REFERENCES accounts(id),
-  action TEXT NOT NULL,
-  occurred_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_rate_limit_account_time ON rate_limit_events (account_id, occurred_at DESC);
-
-CREATE TABLE captcha_events (
-  id BIGSERIAL PRIMARY KEY,
-  account_id TEXT REFERENCES accounts(id),
-  context TEXT,
-  resolved BOOLEAN DEFAULT FALSE,
-  occurred_at TIMESTAMPTZ DEFAULT NOW()
-);
+```bash
+APIFY_TOKEN=apify_api_xxx
+APIFY_LINKEDIN_PROFILE_ACTOR=harvestapi~linkedin-profile-scraper
+APIFY_LINKEDIN_PEOPLE_SEARCH_ACTOR=harvestapi~linkedin-profile-search
+SCRAPING_BACKEND=patchright
+PATCHRIGHT_PROXY_URL=http://brd.superproxy.io:33335
+PATCHRIGHT_PROXY_USERNAME=brd-customer-...-zone-maxv_linkedin_unlocker
+PATCHRIGHT_PROXY_PASSWORD=<bd unlocker zone password>
 ```
+
+How it works:
+
+- `get_profile`, `search_people`, `get_profile_activity`, company tools → Apify harvestapi actors (residential proxy + cookie injection internal to Apify; no user cookies)
+- `search_jobs`, `get_job_details` → Patchright + BD Web Unlocker (handles auth + CAPTCHA + JS render at proxy layer; ~$2.50/CPM)
+- Apify run helper (`src/scrapers/apify-helper.ts`) uses async `/runs` flow + `statusMessage` parsing → throws `UPSTREAM_FAIL` with upgrade hint when actor SUCCEEDS but `statusMessage` matches FREE_LIMIT_PATTERNS (silent throttle on free plan)
+
+### Mode B — Cookie + local Patchright (no per-request cost)
+
+Stack envs:
+
+```bash
+SCRAPING_BACKEND=patchright
+# (Apify and BD tokens unset)
+```
+
+Per-account: fresh `li_at` cookie set via `/linkedin-cookie-refresh` capture flow. Browser pool launches `chromium.launchPersistentContext` per account with hydrated cookies. Limited to surfaces LinkedIn allows from datacenter IP (job pages OK; `/in/`, `/feed/`, `/search/people/` hit authwall).
+
+### Mode C — Hybrid
+
+Both Mode A envs + per-account cookies. Server prefers Apify when `APIFY_TOKEN` present, falls back to cookie+HTML on Apify failure. Maximum reliability for tight-margin Agency ops.
+
+Switching modes is a single env change — no code redeploy.
 
 ---
 
-## Browser pool design (Patchright)
+## Smart pipeline — `optimize_profile`
+
+Three-layer fallback (v0.13.11-13):
+
+1. **Manual `profileText`** (fastest, free) — caller pastes profile text directly
+2. **`profileUrl` + Tavily Extract** — checks `isLinkedInAntiScrapePage()` against:
+   - Layer A — i18n 404 markers (EN/PT/ES/AR/CS/DA + multi-lang switcher)
+   - Layer B — auth-wall markers (`Sign Up | LinkedIn`, `Agree & Join LinkedIn`, `seo-authwall`, `trk=linkedin-tc_auth-button`)
+3. **`profileUrl` + Apify fallback** — `scrapeProfile()` returns `ProfileData`; `profileDataToText()` renders to LLM-ready text
+4. **Empty Apify guard** (v0.13.13) — if Apify returns SUCCESS with empty `fullName` (URL doesn't exist), throw `EXTERNAL_API_FAIL` with actionable message
+
+Logger field `textSource: 'manual' | 'tavily' | 'apify'` for ops visibility on which path resolved each call.
+
+---
+
+## Browser pool design (Patchright, Mode B/C)
 
 ```typescript
 // src/browser/pool.ts
-export class BrowserPool {
-  private contexts: Map<string, BrowserContext> = new Map();
-  private rateLimiters: Map<string, TokenBucket> = new Map();
-
-  async acquire(accountId: string): Promise<BrowserContext> {
-    await this.rateLimiters.get(accountId)?.consume(1);
-    let ctx = this.contexts.get(accountId);
-    if (!ctx || !ctx.isConnected()) {
-      ctx = await this.createContext(accountId);
-    }
-    return ctx;
-  }
-
-  private async createContext(accountId: string): Promise<BrowserContext> {
-    const cookie = await this.loadCookie(accountId);
-    const browser = await chromium.launchPersistentContext(
-      `/var/data/profiles/${accountId}`,
-      {
-        headless: process.env.PATCHRIGHT_HEADLESS === "true",
-        viewport: { width: 1920, height: 1080 },
-        locale: "en-US",
-        timezoneId: "America/New_York",
-        args: [
-          "--disable-blink-features=AutomationControlled",
-          "--disable-features=IsolateOrigins,site-per-process",
-        ]
-      }
-    );
-    await browser.addCookies([{
-      name: "li_at",
-      value: cookie,
-      domain: ".linkedin.com",
-      path: "/",
-      httpOnly: true,
-      secure: true,
-      sameSite: "None"
-    }]);
-    return browser;
-  }
-
-  async healthCheck(accountId: string): Promise<"ok" | "captcha" | "logged_out" | "banned"> {
-    const ctx = await this.acquire(accountId);
-    const page = await ctx.newPage();
-    await page.goto("https://www.linkedin.com/feed/", { waitUntil: "domcontentloaded" });
-    if (page.url().includes("checkpoint")) return "captcha";
-    if (page.url().includes("uas/login")) return "logged_out";
-    const title = await page.title();
-    if (title.includes("restricted")) return "banned";
-    return "ok";
-  }
+class BrowserPool {
+  contexts: Map<accountId, BrowserContext>
+  acquire(accountId): BrowserContext         // lazy init via launchPersistentContext
+  healthCheck(accountId): "ok"|"captcha"|"logged_out"|"banned"
+  invalidate(accountId): void
+  shutdown(): void                           // graceful, called from SIGINT/SIGTERM
 }
 ```
 
-Token bucket por conta:
-- Search: 100/dia, 10/hora.
-- Profile fetch: 80/dia, 8/hora.
-- Apply: 50/dia, 5/hora.
-- Message: 30/dia, 3/hora.
-- Post: 5/dia.
+Persistent context per account at `/var/data/profiles/<accountId>` — fingerprint stable, localStorage persisted.
 
-Quiet hours configuráveis (default 23h-07h timezone do account).
+Patchright over vanilla Playwright: patches `navigator.webdriver`, `chrome.runtime`, `navigator.plugins`, canvas/WebGL fingerprint. LinkedIn detects Playwright vanilla in ~2 days; Patchright maintains 30+ days (community data 2025-26).
+
+Launch options:
+- `headless: env.PATCHRIGHT_HEADLESS`
+- `proxy: { server: PATCHRIGHT_PROXY_URL, username, password }` (when set — BD Unlocker)
+- `args: ["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]`
+- `ignoreDefaultArgs: ["--enable-automation"]`
 
 ---
 
-## Rate limiting estratégia
+## Rate limiting
+
+`src/rate-limit/strategy.ts` defines per-action limits:
 
 ```typescript
-// src/rate-limit/strategy.ts
 export const ACTION_LIMITS = {
-  search: { per_hour: 10, per_day: 100, jitter_ms: [800, 3000] },
-  profile_fetch: { per_hour: 8, per_day: 80, jitter_ms: [1500, 5000] },
-  apply: { per_hour: 5, per_day: 50, jitter_ms: [10_000, 30_000] },
-  message: { per_hour: 3, per_day: 30, jitter_ms: [5000, 15_000] },
-  post: { per_hour: 2, per_day: 5, jitter_ms: [60_000, 300_000] },
-  feed_scroll: { per_hour: 30, per_day: 200, jitter_ms: [500, 2000] }
+  search_jobs:        { per_hour: 10,  per_day: 100, jitter_ms: [800, 3000]      },
+  get_profile:        { per_hour: 8,   per_day: 80,  jitter_ms: [1500, 5000]     },
+  apply_easy:         { per_hour: 5,   per_day: 50,  jitter_ms: [10_000, 30_000] },
+  send_message:       { per_hour: 3,   per_day: 30,  jitter_ms: [5000, 15_000]   },
+  post_update:        { per_hour: 2,   per_day: 5,   jitter_ms: [60_000, 300_000]},
+  list_feed:          { per_hour: 30,  per_day: 200, jitter_ms: [500, 2000]      },
+  // ... per tool
 } as const;
-
-// Jitter aplicado SEMPRE entre ações.
-// Ações dentro de jitter_ms[0]-jitter_ms[1] random delay.
-// Detect captcha → pause conta 24h, alert admin.
 ```
+
+Token bucket implementation in `src/rate-limit/token-bucket.ts` — Redis `INCR` + `EXPIRE` keyed by `rl:hour:{accountId}:{action}:{YYYY-MM-DD-HH}` (TTL 2h) and `rl:day:{accountId}:{action}:{YYYY-MM-DD}` (TTL 25h).
+
+Race condition acceptable for current single-tenant volume; Lua script atomicity available if multi-tenant scale demands.
+
+---
+
+## License gate (Sprint 3)
+
+License server: Cloudflare Worker at `https://license.linkedin.produtoramaxvision.com.br/v1/check`. POST `{ licenseKey }` returns `{ valid, tier, expiresAt, features }`.
+
+MCP server flow:
+
+1. Request arrives at `/mcp` POST
+2. `c.req.header('x-maxvision-license')` extracted
+3. `withRequestContext({ licenseKey }, async () => { ... })` propagates via AsyncLocalStorage
+4. Tool handler calls `gateToolByLicense(tool.name, ctx.licenseKey)` — checks `license_cache` table first (1h TTL), then queries Worker on miss
+5. Pro tools 401 without valid header when `LICENSE_CHECK_ENABLED=true`
+
+Stripe → Worker webhook `/v1/issue` (test mode wired, live deferred to first paying customer). License email delivery via Resend planned Sprint 9.
 
 ---
 
 ## Anti-detect
 
-1. **Patchright** (não Playwright) — patches conhecidos para esconder `webdriver`, `chrome`, `permissions`, etc.
-2. **Persistent context por conta** — `/var/data/profiles/<account_id>` mantém localStorage, cache, fingerprint estável.
-3. **Cookies só** — nunca login com user/pass automatizado (LinkedIn detecta na hora).
-4. **Headers e timezone** consistentes com região da conta.
-5. **Mouse movement humanizado** — `playwright-extra` + plugin de human-like motion entre clicks.
-6. **Scroll natural** — easeInOutQuad, não scroll instantâneo.
-7. **Quiet hours** + jitter randomizado.
-8. **Proxy residencial opcional** (tier Agency) — Bright Data / Oxylabs por conta.
-9. **Health check periódico** — detect captcha precoce, pausa conta antes de ban.
-10. **Multi-account rotation** — distribui carga, reduz signal por conta individual.
+1. **Apify backbone (Mode A default)** — eliminates most anti-detect concerns; Apify actors handle proxy + fingerprint internally
+2. **Patchright (Mode B/C residual)** — patches known automation flags
+3. **Persistent context** per account — fingerprint stable
+4. **Cookies only** — never login automation (LinkedIn detects on the spot)
+5. **Headers + timezone** consistent per account
+6. **Mouse + scroll** humanized (Bezier curves, easeInOutQuad)
+7. **Quiet hours + jitter** randomized (`ACTION_LIMITS.jitter_ms`)
+8. **BD Web Unlocker** as proxy egress when Mode A (residential IP + premium domain unlocking)
+9. **Health check** detects captcha/logout/ban early — pauses account before bigger enforcement
+10. **Multi-account rotation** distributes signal (Pro tier up to 3, Agency unlimited)
 
 ---
 
-## Deployment options
+## Deployment
 
-A mesma imagem Docker (`ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:<tag>`) é o artefato único de release. Três orquestradores são suportados oficialmente.
+Same Docker image (`ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.13.13`) across all three modes documented in `docs/deploy-docker-swarm.md`:
 
-### Matriz de modos
-
-| Capacidade | Compose standalone | Swarm CLI | Portainer Compose | Portainer Swarm |
+| Capacidade | Compose | Swarm CLI | Portainer Compose | Portainer Swarm |
 |---|---|---|---|---|
 | Multi-node | Não | Sim | Não | Sim |
-| Rolling updates com rollback | Não (recreate) | Sim | Não | Sim |
+| Rolling updates + rollback | Não | Sim | Não | Sim |
 | Secrets em runtime | File mount | Swarm secrets | Env vars | Swarm secrets |
-| Configs versionáveis (init.sql) | Volume mount | Swarm configs | Volume mount | Swarm configs |
-| GitOps (auto-pull do repo) | Não (manual) | Não (script) | Sim | Sim |
+| GitOps (auto-pull) | Não | Não | Sim | Sim |
 | Webhook deploy | Não | Não | Sim | Sim |
 | UI de gestão | Não | Não | Sim | Sim |
-| Replicas | 1 fixa | N configurável | 1 fixa | N configurável |
-| Healthcheck Traefik integrado | Sim (labels services) | Sim (labels deploy) | Sim | Sim |
+| Replicas | 1 | N | 1 | N |
 
-### Templates fornecidos
-
-| Arquivo | Modo | Uso |
-|---|---|---|
-| `mcp-server/docker/Dockerfile` | comum | Multi-stage Node 20 + Python 3.12 + Patchright + Chromium |
-| `mcp-server/docker/docker-compose.yml` | Compose | Single-host, secrets via file |
-| `mcp-server/docker/docker-stack.yml` | Swarm CLI | Multi-node, secrets externos, configs, placement, rolling update |
-| `mcp-server/docker/portainer-stack.yml` | Portainer | Compose/Swarm via Portainer UI ou Git |
-| `mcp-server/docker/.env.example` | comum | Variáveis não-sensíveis |
-| `mcp-server/docker/postgres/init.sql` | comum | Schema inicial idempotente (10 tabelas) |
-| `mcp-server/docker/secrets/README.md` | Compose | Instruções de geração local de secrets |
-| `mcp-server/docker/traefik-labels.md` | comum | Referência de labels Traefik (router, service, middlewares) |
-
-### Padrões de release
-
-1. **Build CI** (GitHub Actions, on tag `v*`): build da imagem multi-arch (amd64 + arm64) → push para GHCR com tags `v1.0.0` + `latest`.
-2. **Compose user**: `docker compose pull && docker compose up -d`.
-3. **Swarm CLI user**: `docker service update --image ghcr.io/.../linkedin-maxvision-mcp:1.0.1 maxv-linkedin_mcp` ou re-deploy stack.
-4. **Portainer GitOps user**: webhook do GitHub → Portainer pulls + redeploys.
-
-### Quando recomendar cada modo (por persona)
-
-| Persona | Modo recomendado | Motivo |
-|---|---|---|
-| Dev solo testando local | Compose standalone | Setup mais rápido; sem Swarm boilerplate |
-| Job-seeker self-hosted (Free tier) | Compose standalone OU Portainer Compose | Single-host suficiente; volume baixo |
-| Founder/creator (Pro tier) | Portainer Swarm OU Swarm CLI | Rolling updates seguras; deploy automatizado via webhook |
-| Agency multi-tenant | Swarm + Portainer + n8n no mesmo cluster | Multi-node; isolamento via overlay; scale horizontal |
-| MaxVision cloud-hosted | Swarm CLI + GitOps via Drone/GH Actions | Controle total; observability via Grafana |
-
-### n8n no mesmo Swarm (Variante B Agency)
-
-Para tier Agency, MCP e n8n podem co-existir no mesmo Swarm cluster:
-
-```yaml
-# docker-stack-n8n.yml (referência, fora deste blueprint)
-services:
-  n8n:
-    image: n8nio/n8n:latest
-    networks:
-      - traefik-public  # mesmo overlay do MCP
-    deploy:
-      labels:
-        traefik.http.routers.n8n.rule: "Host(`n8n.cliente.com`)"
-        ...
-```
-
-Vantagens:
-- n8n chama MCP via `http://maxv-linkedin_mcp:3000` (service discovery interna, sem TLS).
-- Traefik único faz roteamento externo de ambos.
-- Logs centralizados no mesmo stack.
-- Backup unificado.
+Production deploy: Docker Swarm + Portainer, single-node, on `produtoramaxvision.com.br` zone, behind Traefik with letsencryptresolver. tmpfs `/dev/shm` 2GB workaround for Swarm `shm_size` limitation (mount-add via `docker service update`).
 
 ---
 
@@ -552,68 +265,80 @@ Vantagens:
 
 | Decisão | Alternativa rejeitada | Justificativa |
 |---|---|---|
-| Patchright sobre Playwright | Playwright vanilla | Anti-detect superior; comunidade ativa em 2025-26 |
-| Python subprocess para `tomquirk/linkedin-api` | Reescrever em TS | Manutenção: lib upstream evolui rápido; subprocess isola crashes |
-| Postgres + Redis sobre SQLite | SQLite só | Multi-tenant, multi-account, concorrência |
-| `confirm_required=true` por default em apply/message | Auto-fire sempre | Compliance ToS + segurança UX (cliente revisa antes) |
-| MCP transport stdio + HTTP | Só stdio | HTTP necessário para integração n8n e cloud-hosted |
+| Apify+BD backbone (Mode A default) | Patchright cookie-only | Datacenter ASN authwall; Apify handles proxy + fingerprint; BD Unlocker for Patchright surfaces (jobs) |
+| Patchright (Mode B/C residual) | Vanilla Playwright | Anti-detect superior; community-maintained patches |
+| Drizzle ORM owns schema | drizzle-kit push em prod | drizzle-kit push pode dropar colunas; migrator + retry safer |
+| `confirm_required=true` default | Auto-fire | Compliance ToS + UX (cliente revisa) |
+| MCP Streamable HTTP stateless | SSE | Simpler ops; per-request McpServer + transport instance (SDK invariant: stateless transport throws on reuse, McpServer rejects 2nd connect) |
 | TypeScript strict + Zod | JS puro | Schemas tipados runtime + dev-time |
-| License key via Cloudflare Worker | Servidor próprio | Latência baixa global; zero infra extra |
-| AGPL-3.0 free + EULA Pro | MIT | Protege contra fork comercial; padrão de produtos similares (Plausible, n8n) |
-| Marketplace dedicado | Adicionar a orchestration | Branding e licensing claros |
-| Compose v3.9 (legacy) em todos os templates | Compose Spec moderno | `docker stack deploy` exige v3 legacy; v3.9 é o último sem breaking changes |
-| Swarm secrets externos vs file mount | Tudo file-based | Em multi-node, file mount não funciona; secrets externos rotacionáveis |
-| Imagem multi-arch (amd64 + arm64) | Só amd64 | VPS ARM (Oracle Free, Hetzner ARM) cada vez mais comum; build no CI uma vez |
-| Patchright + Chromium pré-instalados na imagem | Install runtime | Reduz cold-start de 90s → 5s; aumenta tamanho de imagem (~600MB → ~1.2GB), aceitável |
-| Healthchecks Compose v3 + Traefik labels | Só um dos dois | Compose detecta crash de container; Traefik retira do load-balancer mais rápido (30s) |
+| License via Cloudflare Worker | Servidor próprio | Latência baixa global; KV + Stripe webhook nativo |
+| AGPL-3.0 free + EULA Pro | MIT | Protege contra fork comercial |
+| Marketplace dedicado | Adicionar a orchestration | Branding + licensing claros |
+| Compose v3.9 (legacy) | Compose Spec moderno | `docker stack deploy` exige v3 legacy |
+| Multi-arch image (amd64+arm64) | Só amd64 | VPS ARM (Oracle, Hetzner ARM) cada vez mais comum |
+| AsyncLocalStorage para license header | Pass licenseKey arg em toda tool | Plumbing reduzido; tool handlers ficam puros |
+| Audit log armazena hashes only | Raw input/output | LGPD compliance; ainda permite forensics |
 
 ---
 
 ## Diagramas de fluxo
 
-(versão texto — converter para Mermaid no docs site)
-
-### Fluxo apply_easy com confirm
+### Fluxo apply_easy com confirm gate
 
 ```
 Cliente Claude Code
     │
-    │ tool_call: apply_easy(confirm_required=true)
+    │ tool_call: apply_easy(jobUrl, confirm=false)
     ▼
 MCP server
-    │
+    │ withInstrumentation: validate → license gate → rate limit
     │ Patchright abre vaga
     │ Preenche form (resume + answers)
-    │ Screenshot do form completo
-    │
+    │ Screenshot
     │ INSERT applications (status='preview')
-    │
-    ▼ retorna {status: "preview", application_id: X, preview: {...}}
-Cliente Claude Code
-    │
+    ▼ retorna {status:"preview", application_id, preview:{...}}
+Cliente
     │ Mostra preview ao usuário
     │ Usuário aprova
-    │
-    │ tool_call: apply_easy(confirm=true, application_id=X)
+    │ tool_call: apply_easy(application_id, confirm=true)
     ▼
 MCP server
-    │
     │ Patchright clica "Submit"
     │ UPDATE applications SET status='submitted'
-    │
-    ▼ retorna {status: "submitted", application_id: X}
+    ▼ retorna {status:"submitted", application_id}
 ```
 
-### Fluxo cookie rotation (background)
+### Fluxo optimize_profile smart pipeline
 
 ```
-node-cron @ */6 * * *
-    │
-    │ Para cada account:
-    │   health_check()
-    │
-    ├─ "ok" → nada
-    ├─ "captcha" → pausa 24h, alert admin
-    ├─ "logged_out" → notify cliente trocar cookie li_at
-    └─ "banned" → desabilita account, alert admin
+Cliente
+  │ tool_call: optimize_profile(profileUrl, targetRole)
+  ▼
+MCP
+  │ profileText set?
+  │   YES → skip to LLM
+  │   NO →
+  │     1. Tavily Extract (if TAVILY_API_KEY)
+  │        if isLinkedInAntiScrapePage(rawContent) → fall through
+  │     2. Apify scrapeProfile (if APIFY_TOKEN)
+  │        if profile.fullName empty → throw EXTERNAL_API_FAIL
+  │     3. profileText still empty → VALIDATION_FAIL
+  │
+  │ invokeLlm(prompt) via OpenRouter (Gemini/Claude)
+  │ Parse JSON response
+  ▼ return { summaryAnalysis, headlineSuggestion, gaps[], recommendedSkills[], rewriteAbout }
+```
+
+### Fluxo cookie refresh (Mode B/C)
+
+```
+Operator: /linkedin-cookie-refresh --account-id <id>
+  │ Skill opens Chromium via Patchright on operator's machine
+  │ Operator logs into LinkedIn, captures cookie set
+  ▼
+POST /admin/account-cookie {accountId, cookies[], expiresInDays}
+  │ Server: encryptCookie(JSON.stringify(cookies)) → BYTEA
+  │ Server: UPSERT accounts with cookie_encrypted + cookie_expires_at
+  │ Audit: hash of *encrypted blob* (never plaintext)
+  ▼ return {accountId, expiresAt}
 ```
