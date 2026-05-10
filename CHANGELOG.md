@@ -6,6 +6,19 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.13 — reject empty Apify profile in optimize_profile fallback)
+
+- v0.13.12 detected auth-wall + 404 patterns and triggered Apify fallback,
+  but Apify can return SUCCESS with empty `ProfileData` when the URL is
+  genuinely non-existent (no profile to scrape). Empty `fullName` slipped
+  through and `profileDataToText()` produced ~12 chars of newlines. LLM
+  analyzed empty input and returned generic AI Engineer template — same
+  garbage UX as before the smart pipeline.
+- v0.13.13 guard: after Apify call, validate `profile.fullName` is
+  non-empty before passing to LLM. If empty, throw
+  `EXTERNAL_API_FAIL` with actionable message ("URL likely does not
+  exist on LinkedIn. Verify slug or pass profileText manually").
+
 ### Fixed (v0.13.12 — isLinkedInAntiScrapePage detects auth-wall page)
 
 - v0.13.11 detector matched only LinkedIn's i18n 404 page
