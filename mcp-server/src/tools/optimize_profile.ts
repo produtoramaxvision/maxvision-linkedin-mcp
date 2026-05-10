@@ -165,6 +165,17 @@ export const optimizeProfile = withInstrumentation<OptimizeProfileInput, Optimiz
     if (!profileText && input.profileUrl) {
       try {
         const profile = await scrapeProfile({ accountId, profileUrl: input.profileUrl });
+        // Apify can return SUCCESS with empty ProfileData when the URL is
+        // genuinely non-existent (no profile to scrape). Reject that case
+        // with a clear error rather than feeding an empty string to the LLM
+        // (which would produce a generic template — bug seen in v0.13.12).
+        if (!profile.fullName || profile.fullName.trim().length === 0) {
+          throw new AppError(
+            'EXTERNAL_API_FAIL',
+            `Apify returned an empty profile for ${input.profileUrl} — URL likely does not exist on LinkedIn. Verify the profile slug or pass profileText manually.`,
+            { tool: 'optimize_profile', profileUrl: input.profileUrl, apifyName: profile.fullName },
+          );
+        }
         profileText = profileDataToText(profile);
         textSource = 'apify';
         logger.info(
@@ -172,10 +183,12 @@ export const optimizeProfile = withInstrumentation<OptimizeProfileInput, Optimiz
           'optimize_profile apify fallback ok',
         );
       } catch (err) {
+        const isAppErr = err instanceof AppError;
         logger.error(
           { err: (err as Error).message, profileUrl: input.profileUrl },
           'optimize_profile apify fallback also failed',
         );
+        if (isAppErr) throw err;
         throw new AppError(
           'EXTERNAL_API_FAIL',
           `Both Tavily and Apify could not extract profile from ${input.profileUrl}. Pass profileText manually as workaround.`,
