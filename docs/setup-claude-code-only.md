@@ -18,21 +18,24 @@ Guia passo-a-passo para instalar a Variante A. Voltado para o cliente final do t
 ## Passo 1 — Instalar plugin Claude Code
 
 ```bash
-# Adicionar marketplace MaxVision LinkedIn Suite
-claude /plugin marketplace add produtoramaxvision/maxvision-linkedin-mcp
-
-# Instalar plugin free
-claude /plugin install maxvision-linkedin-suite:linkedin-maxvision
+# Instalar diretamente do GitHub
+claude /plugin install produtoramaxvision/maxvision-linkedin-mcp
 
 # Verificar
 claude /plugin list
 ```
 
-Você deve ver:
+Você deve ver (v0.13.13 atual):
+
 ```
-linkedin-maxvision (1.0.0) — instalado [free]
-  skills: linkedin-job-search, linkedin-resume-tailor, ...
-  commands: /linkedin-scan, /linkedin-tailor, /linkedin-audit
+linkedin-maxvision (0.13.13) — instalado
+  commands: /linkedin-find-jobs, /linkedin-job-details, /linkedin-profile,
+            /linkedin-applications, /linkedin-track, /linkedin-status,
+            /linkedin-cookie-refresh, /linkedin-setup-n8n
+  agents:   linkedin-job-hunter, linkedin-resume-tailor,
+            linkedin-application-tracker, linkedin-anti-detect-monitor
+  skills:   cover-letter-craft, interview-prep-pt-br, lgpd-gdpr-handling,
+            linkedin-anti-detect-rules, linkedin-tos-compliance, resume-tailoring
 ```
 
 ---

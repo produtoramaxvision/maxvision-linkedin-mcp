@@ -45,6 +45,7 @@ import { db } from './db/client.js';
 import { accounts, auditLog } from './db/schema.js';
 import { registerAllTools } from './tools/_registry.js';
 import { browserPool } from './browser/pool.js';
+import { SERVER_NAME, SERVER_VERSION } from './version.js';
 
 /**
  * Body schema for POST /admin/account-cookie.
@@ -85,9 +86,6 @@ const AdminCookieBodySchema = z
     message: 'either `cookies` array or `cookieValue` string is required',
     path: ['cookies'],
   });
-
-const SERVER_NAME = 'maxvision-linkedin-mcp';
-const SERVER_VERSION = '0.1.0';
 
 const startedAt = Date.now();
 

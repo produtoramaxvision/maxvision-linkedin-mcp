@@ -1,98 +1,180 @@
-# MaxVision LinkedIn MCP — Blueprint Master
+# MaxVision LinkedIn Suite
 
-Plugin Claude Code + servidor MCP dedicado a automação LinkedIn para empacotamento como infoproduto comercial MaxVision.
+LinkedIn automation for Claude Code: **16 MCP tools** for job search, applications, profile audit, outreach, company intelligence, and engagement monitoring.
 
-> **Status:** Blueprint v0.2 — decisão de marketplace **APROVADA**. Repositório novo dedicado será criado no Sprint 0. Sem código ainda; este diretório agrupa documentos de design, roadmap e templates de deploy antes do início do desenvolvimento.
+[![License: AGPL-3.0](https://img.shields.io/badge/License-AGPL%203.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+[![Status](https://img.shields.io/badge/status-LIVE-brightgreen.svg)](https://linkedin.produtoramaxvision.com.br)
+
+> **Status:** Production. v0.1.0 LIVE at `https://linkedin-mcp.produtoramaxvision.com.br/mcp`. Free tier active; Pro/Agency tiers gated via `MAXVISION_LICENSE` header.
 
 ---
 
-## Sumário
+## What you get
 
-| Documento | Descrição |
+A Claude Code plugin (`linkedin-maxvision`) that connects to a hosted MCP server (Node 20 + TypeScript + Drizzle + Postgres + Redis). The server uses an **Apify + BrightData Web Unlocker** backbone — no cookie management on the user side.
+
+### 16 MCP tools
+
+| Surface | Tools |
 |---|---|
-| [MARKETPLACE-DECISION.md](MARKETPLACE-DECISION.md) | Análise das três opções de distribuição. Decisão final: criar marketplace novo dedicado. |
-| [MARKETPLACE-CREATION-RUNBOOK.md](MARKETPLACE-CREATION-RUNBOOK.md) | Sprint 0 passo-a-passo. Ponto de entrada da próxima sessão. |
-| [blueprints/PLAN-A-claude-code-only.md](blueprints/PLAN-A-claude-code-only.md) | Versão standalone — apenas Claude Code + MCP server, sem n8n. |
-| [blueprints/PLAN-B-hybrid-n8n.md](blueprints/PLAN-B-hybrid-n8n.md) | Versão híbrida — mesmo MCP + 4 workflows n8n para cron, batch, notify e tracking. |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Stack técnica, schemas MCP, diagramas, decisões de design. |
-| [docs/ROADMAP.md](docs/ROADMAP.md) | Sprints, milestones, releases v0 → v1. |
-| [docs/INFOPRODUCT-PACKAGING.md](docs/INFOPRODUCT-PACKAGING.md) | Estrutura GitHub, licensing dual, CI/CD, distribuição comercial. |
-| [docs/RISKS-COMPLIANCE.md](docs/RISKS-COMPLIANCE.md) | LinkedIn ToS, anti-detect, cookie rotation, mitigação de ban. |
-| [docs/deploy-docker-swarm.md](docs/deploy-docker-swarm.md) | Guia consolidado dos três modos de deploy: Docker standalone, Swarm CLI, Portainer (Compose ou Swarm). |
-| [docs/setup-claude-code-only.md](docs/setup-claude-code-only.md) | Setup cliente Variante A. |
-| [docs/setup-hybrid-n8n.md](docs/setup-hybrid-n8n.md) | Setup cliente Variante B. |
-| [mcp-server/docker/](mcp-server/docker/) | Templates de deploy: `Dockerfile`, `docker-compose.yml`, `docker-stack.yml` (Swarm), `portainer-stack.yml`, `traefik-labels.md`, `postgres/init.sql`, `secrets/README.md`. |
+| **Jobs** | `search_jobs`, `get_job_details`, `apply_easy` (Pro) |
+| **Profiles** | `get_profile`, `optimize_profile` (smart pipeline Tavily → Apify), `get_profile_activity` |
+| **People search** | `search_people` (Pro) |
+| **Companies** | `get_company_info`, `search_companies`, `find_company_employees` |
+| **Feed & posts** | `list_feed`, `post_update` (Pro), `monitor_post_engagement` |
+| **Messaging** | `send_message` (Pro) |
+| **Tracking** | `track_application`, `list_applications` |
+
+### 8 slash commands
+
+`/linkedin-find-jobs`, `/linkedin-job-details`, `/linkedin-profile`, `/linkedin-applications`, `/linkedin-track`, `/linkedin-status`, `/linkedin-cookie-refresh`, `/linkedin-setup-n8n`
+
+### 4 specialized agents
+
+`linkedin-job-hunter`, `linkedin-resume-tailor`, `linkedin-application-tracker`, `linkedin-anti-detect-monitor`
+
+### 6 skills
+
+`cover-letter-craft`, `interview-prep-pt-br`, `lgpd-gdpr-handling`, `linkedin-anti-detect-rules`, `linkedin-tos-compliance`, `resume-tailoring`
+
+### 4 n8n workflows (hybrid Variant B)
+
+`linkedin-daily-scan`, `linkedin-batch-apply`, `linkedin-recruiter-reply`, `linkedin-profile-weekly-audit`
 
 ---
 
-## Decisão de marketplace (status: aprovado)
+## Quick install
 
-**Marketplace novo dedicado** — `maxvision-linkedin-suite`. Decisão tomada e ratificada.
+```bash
+# 1. Get an API key
+#    → email produtoramaxvision@gmail.com (Free tier — limited rate during beta)
+#    You'll receive: mxv_<48hex>
 
-Não será inserido em `maxvision-orchestration` (plugin interno de roteamento) nem em `maxvision-claude-plugins` (repositório genérico interno). Justificativa em [MARKETPLACE-DECISION.md](MARKETPLACE-DECISION.md).
+# 2. Set env var (one-time)
+#    Windows PowerShell:
+[Environment]::SetEnvironmentVariable("MAXVISION_API_KEY", "mxv_xxxx", "User")
+#    macOS/Linux:
+echo 'export MAXVISION_API_KEY=mxv_xxxx' >> ~/.zshrc
 
-- Repositório público: `produtoramaxvision/maxvision-linkedin-mcp` (free tier + landing).
-- Repositório privado: `produtoramaxvision/maxvision-linkedin-mcp-pro` (Pro/Agency + license server + Stripe).
-- License dual: AGPL-3.0-or-later para tier free, EULA proprietária para tier Pro/Agency.
+# 3. Install the plugin (Claude Code)
+claude /plugin install produtoramaxvision/maxvision-linkedin-mcp
 
-Próximos passos da criação seguem em [MARKETPLACE-CREATION-RUNBOOK.md](MARKETPLACE-CREATION-RUNBOOK.md).
+# 4. Restart Claude Code → plugin auto-connects to the hosted MCP server
+
+# 5. Verify
+/linkedin-status
+```
+
+For Pro tier (`apply_easy`, `send_message`, `post_update`, `search_people`):
+```bash
+[Environment]::SetEnvironmentVariable("MAXVISION_LICENSE", "MAXV-PRO-...", "User")
+```
+
+License purchase: <https://linkedin.produtoramaxvision.com.br/pricing>
 
 ---
 
-## Modos de deploy suportados
+## Repository layout
 
-O MCP server pode rodar em qualquer um dos três modos abaixo. Mesma imagem Docker, mesmo binário. A escolha é só de orquestrador.
-
-| Modo | Comando-chave | Quando usar |
-|---|---|---|
-| **Docker Engine standalone** | `docker compose up -d` | Dev local, single-host pequeno, primeiro setup |
-| **Docker Swarm CLI** | `docker stack deploy -c docker-stack.yml maxv-linkedin` | Produção self-managed, multi-node, controle total |
-| **Portainer Stack (Compose ou Swarm)** | UI → Stacks → Add stack | Produção com gestão visual, GitOps via repo, equipes |
-
-Templates prontos em `mcp-server/docker/`. Guia completo em [docs/deploy-docker-swarm.md](docs/deploy-docker-swarm.md).
+```
+maxvision-linkedin-mcp/
+├── .claude-plugin/
+│   └── marketplace.json              # Marketplace registration
+├── plugins/linkedin-maxvision/       # Claude Code plugin
+│   ├── .claude-plugin/plugin.json
+│   ├── commands/                     # 8 slash commands
+│   ├── agents/                       # 4 specialized agents
+│   ├── skills/                       # 6 skills
+│   ├── n8n-workflows/                # 4 hybrid workflows
+│   └── hooks/                        # SessionStart + PreToolUse + PostToolUse
+├── mcp-server/                       # Node 20 + TS + Drizzle + Postgres
+│   ├── src/tools/                    # 16 MCP tools
+│   ├── src/scrapers/                 # Apify, LinkedIn jobs/profile, Tavily
+│   ├── src/auth/                     # API key, license gate, cookie crypto
+│   ├── src/browser/                  # Patchright pool + BD Unlocker proxy
+│   ├── src/db/                       # Drizzle schema + repos
+│   ├── src/rate-limit/               # Redis token bucket
+│   ├── docker/                       # Compose, Swarm, Portainer templates
+│   └── drizzle/                      # SQL migrations
+├── workers/license/                  # Cloudflare Worker license server
+├── landing/                          # Static landing (CF Pages)
+├── sprint0-deliverables/             # Live deploy reference scaffolds
+├── docs/                             # Architecture, install, roadmap, risks
+│   ├── ARCHITECTURE.md
+│   ├── ROADMAP.md
+│   ├── install-modes.md              # Apify (A) vs cookie+browser (B) vs hybrid (C)
+│   ├── scraping-backends.md          # Backend rationale + 2026 LinkedIn reality
+│   ├── setup-claude-code-only.md     # Variant A walkthrough
+│   ├── setup-hybrid-n8n.md           # Variant B walkthrough
+│   ├── deploy-docker-swarm.md        # Three deploy modes
+│   ├── license-deploy-checklist.md   # CF Worker + Stripe runbook
+│   ├── tunnel-architectures.md       # Companion daemon options (Sprint 7+)
+│   ├── RISKS-COMPLIANCE.md           # ToS, GDPR/LGPD, anti-detect
+│   └── historical/                   # Pre-implementation blueprints (audit only)
+├── CHANGELOG.md
+├── LICENSE                           # AGPL-3.0-or-later
+└── README.md                         # this file
+```
 
 ---
 
-## Visão de produto
+## Tiers
 
-**Nome comercial sugerido:** MaxVision LinkedIn Suite
-**Tagline:** *"O assistente LinkedIn nativo do Claude Code. Busca, aplica, otimiza e converte — sem você abrir o navegador."*
-
-### Personas-alvo
-1. **Job-seeker tech** — engenheiro/dev procurando vaga remota internacional. Quer aplicar em 30+ vagas/dia com resume customizado.
-2. **Founder/creator** — usa LinkedIn como canal de growth. Quer publicação programada + engagement automático + outreach a leads.
-3. **Recrutador/headhunter** — Sales Navigator power user. Quer extrair perfis, mensagens em massa com aprovação humana, tracking em CRM.
-4. **Agência de carreira** — gerencia LinkedIn de múltiplos clientes. Multi-conta + white-label.
-
-### Cobertura funcional
-
-| Feature | Tier Free | Tier Pro | Tier Agency |
+| Feature | Free | Pro | Agency |
 |---|---|---|---|
-| Busca de vagas (multi-board) | ✓ | ✓ | ✓ |
-| Resume tailoring por JD | ✓ | ✓ | ✓ |
-| Profile audit | ✓ | ✓ | ✓ |
-| Feed engagement (1 conta) | ✓ | ✓ | ✓ |
-| Easy Apply automático | — | ✓ | ✓ |
-| Outreach DM em massa (com aprovação) | — | ✓ | ✓ |
-| Multi-conta cookie pool | — | até 3 | ilimitado |
-| Sales Navigator scraping | — | ✓ | ✓ |
-| Recruiter integration | — | — | ✓ |
-| n8n workflows premium | — | ✓ | ✓ |
-| MCP cloud-hosted (sem VPS própria) | — | opcional | incluso |
+| Job search + tracking | ✓ | ✓ | ✓ |
+| Profile + company lookup | ✓ | ✓ | ✓ |
+| `optimize_profile` (Claude/Gemini analysis) | ✓ | ✓ | ✓ |
+| Easy Apply automation | — | ✓ | ✓ |
+| DM/InMail (with confirm gate) | — | ✓ | ✓ |
+| Post creation | — | ✓ | ✓ |
+| People search | — | ✓ | ✓ |
+| Multi-account pool | — | up to 3 | unlimited |
+| Sales Navigator surfaces | — | ✓ | ✓ |
+| n8n workflow integration | — | ✓ | ✓ |
 | White-label | — | — | ✓ |
-| Priority support | — | — | ✓ |
 
-### Pricing sugestão (a validar)
-- Free — BYO infra, single account, open-source AGPL.
-- Pro — USD 29/mês ou USD 290/ano.
-- Agency — USD 99/mês ou USD 990/ano.
+Pricing: <https://linkedin.produtoramaxvision.com.br/pricing>
 
 ---
 
-## Próximos passos
+## Self-host (advanced)
 
-1. **Decisão de marketplace** — APROVADA. Marketplace novo dedicado `maxvision-linkedin-suite`.
-2. **Sprint 0** — criar repos públicos/privados, DNS, license server, landing waitlist. Passo-a-passo em [MARKETPLACE-CREATION-RUNBOOK.md](MARKETPLACE-CREATION-RUNBOOK.md).
-3. **Sprint 1** — implementar MCP core conforme [docs/ROADMAP.md](docs/ROADMAP.md).
-4. **Variante inicial** sugerida: A primeiro (10 dias) → release v1.0 → B depois (5 dias) → release v1.5.
-5. **Deploy** — todos os templates Docker/Swarm/Portainer estão em `mcp-server/docker/`. Validar em ordem: Compose local → Swarm single-node → Portainer Swarm produção.
+The MCP server image is published on GHCR: `ghcr.io/produtoramaxvision/linkedin-maxvision-mcp:0.1.0`. Three deploy modes documented in [docs/deploy-docker-swarm.md](docs/deploy-docker-swarm.md):
+
+- **Docker Compose** standalone (single host)
+- **Docker Swarm CLI** (multi-node, rolling updates)
+- **Portainer Stack** (UI + GitOps)
+
+Required env: `APIFY_TOKEN`, `PATCHRIGHT_PROXY_URL` (BD Unlocker), `DATABASE_URL`, `REDIS_URL`, `MASTER_KEY`, `MCP_API_KEYS`. Optional: `TAVILY_API_KEY`, `LICENSE_CHECK_ENABLED`, `LICENSE_SERVER_URL`.
+
+Backend modes: see [docs/install-modes.md](docs/install-modes.md).
+
+---
+
+## Compliance
+
+- **LinkedIn ToS:** Tools only access data available to your authenticated session. Hard `confirm_required=true` default on `apply_easy`, `send_message`, `post_update`. See [docs/RISKS-COMPLIANCE.md](docs/RISKS-COMPLIANCE.md) and [plugins/linkedin-maxvision/skills/linkedin-tos-compliance/SKILL.md](plugins/linkedin-maxvision/skills/linkedin-tos-compliance/SKILL.md).
+- **LGPD/GDPR:** Cookies AES-256-GCM encrypted at rest; audit log stores SHA-256 hashes only (never raw input/output).
+- **Rate limit:** Token bucket per account (`search`/`profile`/`apply`/`message`/`post` actions, configurable in `mcp-server/src/rate-limit/strategy.ts`).
+
+---
+
+## License
+
+- **Free tier:** AGPL-3.0-or-later (see [LICENSE](LICENSE))
+- **Pro/Agency tier:** Proprietary EULA validated at runtime via license server
+
+Commercial license available — contact `produtoramaxvision@gmail.com`.
+
+---
+
+## Links
+
+- **Homepage:** <https://linkedin.produtoramaxvision.com.br>
+- **MCP endpoint:** `https://linkedin-mcp.produtoramaxvision.com.br/mcp`
+- **Issues:** <https://github.com/produtoramaxvision/maxvision-linkedin-mcp/issues>
+- **Changelog:** [CHANGELOG.md](CHANGELOG.md)
+- **Roadmap:** [docs/ROADMAP.md](docs/ROADMAP.md)
+- **Email:** produtoramaxvision@gmail.com

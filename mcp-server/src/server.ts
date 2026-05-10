@@ -20,9 +20,7 @@ import { startHttpServer } from './http.js';
 import { browserPool } from './browser/pool.js';
 import { shutdownRateLimit } from './rate-limit/token-bucket.js';
 import { db } from './db/client.js';
-
-const SERVER_NAME = 'maxvision-linkedin-mcp';
-const SERVER_VERSION = '0.1.0';
+import { SERVER_NAME, SERVER_VERSION } from './version.js';
 
 const MIGRATIONS_FOLDER = './drizzle/migrations';
 
