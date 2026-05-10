@@ -17,23 +17,44 @@ import { logger } from '../logger.js';
 import { AppError } from '../errors.js';
 
 /**
- * Detects LinkedIn anti-scrape page that Tavily returns for low-visibility
- * profiles (renders multilingual "Page not found" instead of public preview).
- * Bill Gates (30M followers) → public preview liberado. Max Müller (10
- * conexões) → 404 multilingual. Pattern check covers EN/PT/ES/AR/CS markers
- * present in LinkedIn's i18n 404 page.
+ * Detects LinkedIn anti-scrape pages that Tavily returns when no public
+ * preview is available. Two flavors:
+ *
+ *   1. Multilingual 404 page (low-visibility profile, e.g. < 50 connections):
+ *      Bill Gates (30M followers) → public preview liberado.
+ *      Max Müller (10 conexões) → "Page not found" in EN/PT/ES/AR/CS/DA + lang switcher.
+ *
+ *   2. seo-authwall sign-up wall (URL doesn't exist OR profile fully private):
+ *      Renders "Sign Up | LinkedIn / Agree & Join LinkedIn" form. Empirically
+ *      ~4k chars vs ~23k for 404 vs ~90k for real preview.
+ *
+ * Falsy on actual public profile previews (which contain the user's name,
+ * headline, experience, etc).
  */
 function isLinkedInAntiScrapePage(text: string): boolean {
   const head = text.slice(0, 2000);
-  return (
+  // Layer A — i18n 404 markers
+  if (
     /Page not found/i.test(head) ||
     /Stránka nenalezena/i.test(head) ||
     /Página não encontrada/i.test(head) ||
     /Página no encontrada/i.test(head) ||
     /لم يتم العثور على الصفحة/.test(head) ||
     /Siden blev ikke fundet/i.test(head) ||
-    (/# LinkedIn/i.test(head) && /選擇語言/.test(head)) // multi-lang lang switcher header
-  );
+    (/# LinkedIn/i.test(head) && /選擇語言/.test(head))
+  ) {
+    return true;
+  }
+  // Layer B — seo-authwall sign-up wall markers
+  if (
+    /# Sign Up \| LinkedIn/i.test(head) ||
+    /Agree & Join LinkedIn/i.test(head) ||
+    /seo-authwall/i.test(head) ||
+    /trk=linkedin-tc_auth-button/i.test(head)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /**
