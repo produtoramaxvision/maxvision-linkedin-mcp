@@ -244,17 +244,15 @@
 
     <script>
       // Stripe Checkout via /api/checkout (Cloudflare Pages Function).
-      // TODO: Replace with live price IDs from acct_1SWXI9Ad1djWBWMQ.
-      // Create products at dashboard.stripe.com/products, then update below.
-      // See docs/stripe-live-activation.md for full setup guide.
+      // Live price IDs — acct_1SWXI9Ad1djWBWMQ (Produtora MaxVision).
       const PRICES = {
         pro: {
-          monthly: 'price_REPLACE_PRO_MONTHLY',   // R$ 79/mês
-          yearly:  'price_REPLACE_PRO_YEARLY',    // R$ 790/ano
+          monthly: 'price_1TVT97Ad1djWBWMQMwXeOqFy', // R$ 79/mês
+          yearly:  'price_1TVT98Ad1djWBWMQYBDdaX7L',  // R$ 790/ano
         },
         agency: {
-          monthly: 'price_REPLACE_AGENCY_MONTHLY', // R$ 399/mês
-          yearly:  'price_REPLACE_AGENCY_YEARLY',  // R$ 3990/ano
+          monthly: 'price_1TVT98Ad1djWBWMQxqjTOqQI', // R$ 399/mês
+          yearly:  'price_1TVT99Ad1djWBWMQEd2GjzAJ',  // R$ 3990/ano
         },
       };
 
