@@ -6,6 +6,21 @@ All notable changes to MaxVision LinkedIn MCP. Format follows
 
 ## [Unreleased]
 
+### Fixed (v0.13.12 — isLinkedInAntiScrapePage detects auth-wall page)
+
+- v0.13.11 detector matched only LinkedIn's i18n 404 page
+  (low-visibility profile flavor). Empirical test: passing a non-existent
+  URL like `/in/this-profile-does-not-exist-xyz/` returns Tavily 4k chars
+  of LinkedIn's seo-authwall sign-up page — different markers — slipped
+  past the detector. LLM analyzed garbage and produced generic template.
+- v0.13.12 splits detection into two layers:
+  - Layer A (404 page): EN/PT/ES/AR/CS/DA + multi-lang switcher
+  - Layer B (auth wall): "Sign Up | LinkedIn", "Agree & Join LinkedIn",
+    "seo-authwall", "trk=linkedin-tc_auth-button" markers
+- Both flavors now trigger Apify fallback. Apify returns the real profile
+  for valid-but-private URLs OR throws cleanly for genuinely non-existent
+  URLs.
+
 ### Improved (v0.13.11 — optimize_profile smart pipeline Tavily → Apify)
 
 - **Problem**: optimize_profile with profileUrl + Tavily silently returned
