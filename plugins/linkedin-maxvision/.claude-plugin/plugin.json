@@ -1,6 +1,6 @@
 {
   "name": "linkedin-maxvision",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "LinkedIn automation suite for Claude Code: 16 tools (search_jobs/apply/profile/feed/optimize + companies/employees/posts/activity/engagement). Apify harvestapi backend + BD Web Unlocker. Free / Pro / Agency tiers via Stripe.",
   "author": {
     "name": "MaxVision Produtora",
