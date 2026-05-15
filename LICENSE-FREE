@@ -1,0 +1,46 @@
+GNU AFFERO GENERAL PUBLIC LICENSE
+Version 3, 19 November 2007
+
+Applies to: plugins/ layer of this repository.
+Copyright (C) 2026 Produtora MaxVision <produtoramaxvision@gmail.com>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU Affero General Public License as published
+by the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+GNU Affero General Public License for more details.
+
+The full license text is available at:
+https://www.gnu.org/licenses/agpl-3.0.html
+
+SCOPE NOTE
+----------
+This AGPL-3.0 license applies exclusively to the files under the
+plugins/ directory of this repository. The mcp-server/ and workers/
+directories are governed by a separate proprietary license
+(see LICENSE-COMMERCIAL in the root of this repository).
+
+WHAT THIS MEANS FOR USERS
+--------------------------
+You may freely use, modify, and distribute the plugin layer
+(Claude Code plugin configuration, hooks, skills, agents, commands)
+subject to the following conditions:
+
+1. Attribution: You must give appropriate credit and indicate
+   if changes were made.
+
+2. Same License: If you distribute modified versions of the plugin
+   layer, you must use the same AGPL-3.0 license.
+
+3. Network Use is Distribution: If you run a modified version of
+   this plugin layer on a server that users interact with over a
+   network, you must make the modified source code available to
+   those users under AGPL-3.0.
+
+4. The plugin layer connects to the maxvision-linkedin-mcp MCP server.
+   Use of that server is subject to the commercial terms in
+   LICENSE-COMMERCIAL and requires a valid subscription.

@@ -1,6 +1,7 @@
 ---
 name: interview-prep-pt-br
 description: "Use when preparar usuário para entrevistas técnicas e culturais no mercado brasileiro de tech — pipeline típico, perguntas BR-específicas, STAR, pesquisa salarial, negociação CLT vs PJ e perguntas reversas."
+paths: ["**/interview*", "**/entrevista*"]
 ---
 
 # Interview prep — mercado pt-BR
@@ -224,3 +225,201 @@ Ou seja, **PJ 12k/mês ≈ CLT 8.4k/mês** em termos de líquido depois de tudo,
 9. PTO adicional além do CLT padrão (raro, mas alguns lugares dão).
 
 **Princípio**: na negociação, pedir 2-3 itens não-salário primeiro. Recrutador escuta melhor; e para a empresa, equity/PTO são mais baratos que salário base.
+
+---
+
+## 8. Entrevistas assíncronas (HireVue, Spark Hire)
+
+### 8.1 Como o sistema funciona
+
+Plataformas de entrevista assíncrona (HireVue, Spark Hire, VidCruiter, Jobma) funcionam assim:
+
+1. Candidato recebe link com convite por email.
+2. Acessa a plataforma e vê perguntas uma por uma.
+3. Para cada pergunta: tempo de preparação (0–3 min) + tempo de gravação (1–5 min).
+4. Gravação é enviada automaticamente; sem possibilidade de regravar na maioria das plataformas.
+5. Recrutador e hiring manager assistem assincronamente — pode ser em horas ou dias depois.
+6. Plataformas modernas (HireVue) usam análise de IA para pontuação de expressão facial, velocidade de fala e palavras-chave — contestável, mas existe.
+
+**Deadline típico**: 3-7 dias após receber o link. Não deixe para a última hora — qualidade cai sob pressão de tempo.
+
+### 8.2 Dicas de câmera e setup técnico
+
+| Elemento | Especificação recomendada | Erro comum |
+|---|---|---|
+| **Câmera** | Altura dos olhos (laptop elevado ou webcam externa em tripé). Não olhar para baixo. | Câmera no colo apontando para o queixo. |
+| **Iluminação** | Key light frontal (janela ou ring light a ~45° lateral-frontal). Sem luz vindo de trás. | Fundo iluminado, rosto escuro (janela atrás). |
+| **Fundo** | Parede lisa, fundo virtual neutro ou bookshelf arrumada. Sem movimento. | Cama visível, roupa espalhada, familiar passando. |
+| **Áudio** | Headset com microfone posicionado 2-3cm da boca OU microfone de mesa a < 30cm. Ruído ambiente < 40dB. | Áudio do laptop com eco do quarto; buzz de AC. |
+| **Conexão** | Cabo Ethernet sempre que possível. Wi-Fi 5GHz se não houver cabo. Fechar outras abas e apps antes de gravar. | Wi-Fi 2.4GHz com interferência; videochamada cai. |
+| **Vestuário** | Mesma roupa que usaria para entrevista presencial. Cores sólidas (sem listras finas — efeito moiré em câmera). | Camiseta casual demais; listras que vibram na tela. |
+
+### 8.3 Tempo de resposta e estratégia de gravação
+
+- **Use o tempo de preparação inteiro** — não pule para gravar logo; organize mentalmente com estrutura STAR.
+- **Primeiros 5 segundos são decisivos**: comece com afirmação direta, não com "Boa pergunta" ou longa pausa.
+- **Ritmo de fala**: 130–150 palavras por minuto é o ideal para entrevista em vídeo. Mais rápido = nervoso. Mais lento = desinteressado.
+- **Contato visual**: olhar para a câmera, não para a própria imagem na tela. Cobre sua miniatura com um post-it se necessário.
+- **Encerre antes do fim**: terminar a resposta 15-30s antes do timeout soa mais seguro do que ser cortado abruptamente.
+
+### 8.4 Como praticar
+
+1. **Grave a si mesmo** respondendo perguntas comuns no celular ou câmera. Assista com som desligado (só visual) e depois com som (só áudio).
+2. **Use Loom ou OBS** para simular ambiente de gravação com timer — treina a pressão do countdown visível.
+3. **Banco de perguntas comuns**: "Conte sobre um projeto desafiador", "Como lida com conflito em time", "Por que quer trabalhar aqui?", "Qual seu maior ponto de melhoria?"
+4. **Limite de prática**: 3-5 gravações por pergunta. Mais do que isso produz resposta decorada que soa robótica.
+
+### 8.5 Perguntas comuns em formato assíncrono
+
+- `"Conte sobre você em 2 minutos."` — quem você é, o que faz, por que esta empresa.
+- `"Descreva um desafio técnico recente e como resolveu."` — STAR comprimido em 3 min.
+- `"Por que você quer trabalhar na [Empresa]?"` — missão + role específica; sem genérico.
+- `"Qual sua maior fraqueza?"` — fraqueza real + o que você está fazendo para trabalhar nela.
+- `"Onde você se vê em 3 anos?"` — alinhado à trajetória da empresa; sem "CEO da sua empresa".
+
+---
+
+## 9. Take-home assessment
+
+### 9.1 O que recrutadores olham além de "funcionar"
+
+Um take-home que funciona mas está mal estruturado perde para um take-home bem documentado com uma edge case faltando. Critérios reais de avaliação:
+
+| Critério | Peso relativo | O que verifica |
+|---|---|---|
+| **Correção funcional** | Alto | Testes passam, casos básicos cobertos, sem crash em inputs válidos. |
+| **Qualidade do código** | Alto | Legibilidade, nomes de variáveis/funções, separação de responsabilidades, sem magic numbers. |
+| **README e documentação** | Médio-alto | Instruções claras para rodar, decisões explicadas, tradeoffs nomeados. |
+| **Testes** | Médio | Unit tests para lógica crítica; pelo menos 1 teste de integração se aplicável. |
+| **Tratamento de edge cases** | Médio | Input inválido, lista vazia, timeout, concorrência se relevante. |
+| **Arquitetura e extensibilidade** | Médio | O código é fácil de estender? Ou resolve só o caso exato do enunciado? |
+| **Git history** | Baixo-médio | Commits semânticos mostram como você pensa incrementalmente. |
+| **Segurança** | Baixo (varia) | SQL injection, XSS, secrets hardcoded — sinal de senioridade quando bem tratado. |
+
+### 9.2 Estrutura de README ideal para take-home
+
+```
+# [Nome do Projeto / Assessment]
+
+## Como rodar
+[3-5 comandos máximo. Deve funcionar em macOS e Linux sem configuração extra.]
+
+## Decisões de design
+[2-4 bullets sobre escolhas não-óbvias: por que essa estrutura de dados,
+por que essa biblioteca, por que não fiz X.]
+
+## Tradeoffs e o que faria diferente com mais tempo
+[Honestidade aqui é sinal de senioridade. Ex: "O cache está em memória;
+com mais tempo implementaria Redis para suportar múltiplas instâncias."]
+
+## O que não foi implementado (e por quê)
+[Se o enunciado pediu N features e você entregou N-1, explicar o critério
+de priorização — não deixar em branco.]
+
+## Como rodar os testes
+[Comando único. Output esperado.]
+```
+
+### 9.3 Como documentar tradeoffs
+
+Tradeoff bem documentado: `"Escolhi [opção A] em vez de [opção B] porque [razão técnica concreta]. O custo dessa escolha é [consequência], que seria mitigado com [solução] se houvesse mais tempo/escala."
+
+Exemplos:
+- `"Usei SQLite em vez de Postgres para facilitar o setup local. Em produção, a migração para Postgres exigiria apenas trocar o driver e ajustar tipos de data."`
+- `"Não implementei autenticação porque o enunciado não exigiu. Se implementasse, usaria JWT stateless com refresh token em httpOnly cookie."`
+- `"Os testes cobrem 80% do core path; não cobrí a camada de retry por limitação de tempo. O mock de rede já está estruturado para facilitar esse teste."`
+
+### 9.4 Tempo máximo razoável no Brasil
+
+| Nível | Tempo razoável | Além desse limite |
+|---|---|---|
+| Júnior / estágio | até 3h | Red flag acima de 5h sem pagamento |
+| Pleno | até 4h | Red flag acima de 6h sem pagamento |
+| Sênior | até 4h (escopo menor por sênior = mais criterioso, não mais longo) | Red flag acima de 6h |
+| Staff / Principal | até 3h (contexto maior, escopo mais definido esperado) | Red flag acima de 4h |
+
+**Regra geral**: take-home não deve ultrapassar **4h de trabalho efetivo** para nenhum nível no mercado BR. Acima disso sem remuneração é exploração do candidato.
+
+### 9.5 Quando take-home é red flag
+
+- **Mais de 8h de trabalho estimado** para uma primeira etapa sem remuneração.
+- **Pedido de take-home em múltiplos rounds** (ex: primeiro take-home, depois pair programming, depois outro take-home).
+- **Enunciado vago demais**: "faça um sistema de e-commerce" sem critérios claros — impossível saber quando parar.
+- **Prazo de 24h para projeto de 8h+**: pressão artificial que favorece candidatos sem emprego atual.
+- **Trabalho que parece problema real da empresa não anonimizado**: cuidado — pode ser extração de trabalho gratuito.
+- **Sem feedback após envio**: empresa que não dá feedback mínimo após take-home não respeita o tempo investido.
+
+---
+
+## 10. Plano de ação 5 dias pré-entrevista
+
+Estrutura day-by-day para maximizar preparo sem entrar em pânico de última hora.
+
+### D-5 (5 dias antes): Pesquisa de empresa e contexto
+
+**Objetivo**: entender quem é a empresa profundamente antes de preparar qualquer resposta técnica.
+
+- Ler a **job description** completa. Sublinhar: 3 skills required, 2 nice-to-have, 1 frase sobre missão/produto.
+- Pesquisar a empresa: site, blog de engenharia, últimas notícias (Crunchbase, press), posts recentes no LinkedIn da empresa.
+- Identificar o **hiring manager** (LinkedIn) — ler posts, background, empresa anterior.
+- Anotar **3 perguntas específicas** para fazer no final da entrevista (seção 6).
+- Verificar **glassdoor** e comunidades para entender cultura e possíveis red flags.
+- Tempo estimado: **1.5–2h**.
+
+### D-4 (4 dias antes): STAR stories
+
+**Objetivo**: ter 5-6 histórias STAR prontas cobrindo os principais comportamentos avaliados.
+
+- Listar as situações mais impactantes da sua carreira (máximo 3 anos atrás, salvo exceção).
+- Estruturar cada uma no formato STAR com resultado quantificado.
+- Cobrir esses eixos:
+  1. Conflito com colega ou stakeholder — como resolveu.
+  2. Falha técnica ou projeto que deu errado — o que aprendeu.
+  3. Entrega sob pressão de tempo ou recursos.
+  4. Influência sem autoridade (convenceu time de decisão técnica).
+  5. Mentoria ou ajuda a colega júnior.
+  6. Decisão com informação incompleta.
+- Tempo estimado: **2h** (30min por história).
+
+### D-3 (3 dias antes): Mock técnico
+
+**Objetivo**: simular a etapa técnica com pressão real de tempo.
+
+- Resolver 2-3 problemas no estilo do que a empresa costuma fazer (pesquisar Glassdoor, Leetcode Company Tags).
+- Se system design: desenhar em papel ou miro o design de um sistema relevante (cache, fila, API gateway).
+- Se code review: pegar código de um projeto anterior e identificar problemas em voz alta.
+- Praticar **verbalizar o raciocínio** enquanto resolve — entrevistador avalia como você pensa, não só o resultado.
+- Pedir para alguém cronometrar ou usar timer visível.
+- Tempo estimado: **2–3h**.
+
+### D-2 (2 dias antes): Mock behavioral
+
+**Objetivo**: simular a etapa cultural/STAR com outro humano (ou gravação).
+
+- Pedir para amigo, colega ou mentor fazer perguntas comportamentais e cronometrar suas respostas.
+- Se não tiver parceiro: gravar a si mesmo respondendo e assistir criticamente.
+- Verificar: respostas ficam dentro de 3 minutos? Há métricas concretas? A ação (A do STAR) é pessoal, não coletiva?
+- Revisar as **perguntas reversas** preparadas no D-5 — checar se ainda fazem sentido com o que aprendeu sobre a empresa.
+- Preparar a resposta para **"por que você quer sair da empresa atual?"** se aplicável.
+- Tempo estimado: **1.5h**.
+
+### D-1 (dia anterior): Logística e descanso
+
+**Objetivo**: eliminar variáveis de logística e descansar o cérebro.
+
+- **Não estudar conteúdo novo**. Se não sabe até agora, não vai fixar em 12h com o cérebro em estado de alerta.
+- Confirmar logística: horário, formato (presencial/remoto), plataforma (Zoom, Meet, Teams — testar câmera/microfone), link da reunião, nome do entrevistador.
+- Preparar o **ambiente físico**: roupa separada, setup de câmera testado, água na mesa, notificações do celular em silêncio.
+- Ler **uma vez** as notas do D-5 sobre a empresa — só para refrescar, não para memorizar.
+- Dormir **7h mínimo**. Cognição cai 20-30% com menos de 6h de sono — mais impactante do que qualquer revisão de última hora.
+- Tempo estimado: **30min de prep** + descanso intencional.
+
+### Tabela-resumo do plano
+
+| Dia | Foco | Entregável | Horas |
+|---|---|---|---|
+| D-5 | Pesquisa de empresa | 3 perguntas reversas, notas de missão/produto | 1.5–2h |
+| D-4 | STAR stories | 5-6 histórias estruturadas com métricas | 2h |
+| D-3 | Mock técnico | 2-3 problemas resolvidos com verbalização | 2–3h |
+| D-2 | Mock behavioral | Respostas gravadas ou com parceiro, < 3min cada | 1.5h |
+| D-1 | Logística e descanso | Setup testado, 7h de sono | 30min |

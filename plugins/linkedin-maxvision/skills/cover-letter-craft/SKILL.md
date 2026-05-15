@@ -1,6 +1,7 @@
 ---
 name: cover-letter-craft
 description: "Use when escrever ou revisar cover letter customizada por vaga — estrutura de 4 parágrafos (hook → empresa → role → eu → CTA), calibragem de tom por mercado e pesquisa pré-redação. Inclui templates IC sênior e EM."
+paths: ["**/cover-letter*", "**/carta-de-apresentacao*", "**/carta*"]
 ---
 
 # Cover letter craft — guia operacional
@@ -187,3 +188,168 @@ Obrigado,
 6. **Erros de pt-BR / acordo verbal** — para vagas pt-BR, revisar com leitura em voz alta. Erro de português destrói credibilidade num minuto.
 7. **Inventar conexão** — citar post que não leu, projeto que não conhece. Hiring manager descobre em 30s na entrevista.
 8. **Mesma carta para 10 vagas** — recrutadores notam. Single-best-effort por vaga.
+
+---
+
+## 8. Cold outreach vs candidatura formal
+
+### 8.1 Quando usar cold outreach
+
+Cold outreach (contato direto com o hiring manager ou recrutador sem vaga aberta) é mais eficaz do que candidatura via portal quando:
+
+- A empresa é alvo de altíssima prioridade e não há vaga aberta para a role desejada.
+- Você tem conexão de segundo grau com alguém do time.
+- A empresa acabou de fechar rodada de investimento (sinal de contratação iminente nos próximos 60-90 dias).
+- A role anunciada está há mais de 45 dias no portal sem mover — empresa pode estar com processo travado; outreach direto desfaz bloqueio.
+
+Cold outreach via portal (apply) é menos eficaz quando: ATS já filtrou seu perfil (score < 65) e você não tem como reverter. Nesses casos, encontrar alguém interno para indicar é mais produtivo do que reenviar.
+
+### 8.2 Template de cold email para hiring manager
+
+**Canal preferencial**: LinkedIn InMail → email profissional (se visível no perfil/site) → formulário de contato da empresa. Em ordem decrescente de eficácia para tech.
+
+```
+Subject: [Role] — [Seu nome] / [1 sinal de credibilidade curto]
+
+Exemplos de subject:
+"Senior Backend Engineer — João Silva / ex-Nubank, contribuidor ativo de [lib]"
+"Platform Eng — Maria Costa / liderou migração PIX que processou R$2B/mês"
+
+---
+
+Corpo (< 150 palavras):
+
+[Nome do hiring manager],
+
+Vi que o time de [Time] em [Empresa] está crescendo — [sinal específico:
+novo produto, rodada, post do LinkedIn]. Meu trabalho dos últimos [N]
+anos foi exatamente nisso: [1 frase de credibilidade com métrica real].
+
+Não há vaga aberta agora [ou: há uma vaga aberta para X], mas queria
+entender se faz sentido uma conversa de 20min sobre [problema técnico
+específico que você sabe que eles têm]. Posso trazer [algo concreto:
+abordagem para o problema, RFC que escrevi, repositório público].
+
+Se não for o momento, entendo — e fico à disposição para o futuro.
+
+[Seu nome]
+[LinkedIn] | [GitHub]
+```
+
+### 8.3 Taxa de resposta esperada
+
+| Canal | Taxa de resposta (estimativa de mercado) |
+|---|---|
+| InMail LinkedIn (personalizado) | 15–30% |
+| Email profissional direto (personalizado) | 10–20% |
+| Formulário de contato genérico | 2–5% |
+| Apply via portal sem referência interna | 5–15% (varia muito por empresa e ATS) |
+| Apply via portal com referência interna | 40–60% |
+
+**Conclusão operacional**: um cold outreach personalizado para 5 empresas vale mais do que 50 applies via portal sem customização. Volume sem relevância destrói credibilidade a longo prazo.
+
+---
+
+## 9. Detecção de AI writing
+
+### 9.1 Como recrutadores identificam cover letters geradas por AI
+
+Recrutadores experientes (e ferramentas como GPTZero, Originality.ai) identificam cover letters geradas por AI pelos seguintes padrões:
+
+| Sinal | Exemplo típico de AI |
+|---|---|
+| **Transições genéricas** | "Furthermore", "Moreover", "In addition to", "It is worth noting that" |
+| **Em-dash excessivo** | Uso de `—` em toda frase para enfatizar — exatamente como este exemplo — sem variação |
+| **Superlativo vazio** | "deeply passionate", "highly motivated", "uniquely positioned", "exceptional track record" |
+| **Falta de especificidade verificável** | Afirmar "construí sistemas de alta escala" sem número, nome de empresa, data ou tecnologia |
+| **Estrutura perfeitamente paralela** | Três parágrafos exatamente com a mesma extensão e ritmo — soa robótico |
+| **Abertura com o nome da empresa em destaque** | "I am writing to express my interest in the [Role] position at [Empresa]..." |
+| **Ausência de voz pessoal** | Texto fluente, gramaticalmente correto, mas sem personalidade ou quirk |
+
+### 9.2 Como humanizar um draft gerado por AI
+
+O draft de AI é ponto de partida, não entrega final. Edições obrigatórias:
+
+1. **Anedota pessoal verificável**: adicionar 1 frase com contexto específico que só você conhece. Ex: `Quando assumi o projeto de migração em março de 2023, a primeira coisa que fiz foi sentar com o time de suporte para entender o que eles mais sofriam — e não com o código.`
+
+2. **Substituir transições de AI por conectores naturais**: "Furthermore" → "E mais importante:" ou simplesmente nova frase. "It is worth noting" → cortar e afirmar direto.
+
+3. **Voz específica**: identificar uma frase que soa exatamente como você falaria numa conversa. Inserir isso no parágrafo mais genérico.
+
+4. **Assimetria intencional**: um parágrafo um pouco mais curto, uma frase inacabada com ponto após vírgula — textos humanos não são perfeitamente simétricos.
+
+5. **Detalhe não-óbvio**: mencionar algo sobre a empresa que não está na primeira página do Google — post do engineering blog, decisão técnica em changelog, tweet do CTO.
+
+### 9.3 Quando AI-generated é aceitável
+
+- **Draft interno para o próprio processo de escrita**: usar AI para estruturar, humano para personalizar. Resultado final é humano.
+- **Vagas de volume baixíssima prioridade**: se você está aplicando sem expectativa real, AI draft aceitável — mas saiba que provavelmente não vai passar.
+- **Mercados onde cover letter é formalidade**: em algumas empresas BR de grande porte, o cover letter não é lido seriamente — qualquer texto passa. Verifique a cultura antes de investir tempo.
+
+**Quando AI-generated é risco alto**: qualquer vaga onde o hiring manager vai ler com atenção. Vagas de alto sênior, papel de liderança, empresas pequenas com processo artesanal — aqui AI detectado = descarte imediato.
+
+---
+
+## 10. Follow-up pós-aplicação
+
+### 10.1 Timing
+
+| Situação | Quando fazer follow-up |
+|---|---|
+| Apply via portal sem confirmação de recebimento | 5-7 dias úteis após envio |
+| Apply com confirmação automática de ATS | 7-10 dias úteis |
+| Entrevista realizada, sem retorno | 72h após a data prometida para retorno |
+| Oferta verbal, aguardando oferta escrita | 48h após conversa de ofertamento |
+| Processo pausado ("voltamos em contato") | 2 semanas após última comunicação |
+
+**Nunca fazer follow-up**: no mesmo dia do apply. Na manhã de segunda-feira (caixa lotada). Sexta à tarde (avaliações adiadas para semana seguinte).
+
+### 10.2 Canal preferencial
+
+1. **LinkedIn** (mensagem direta para o recrutador que conduziu o processo) — mais visível, menos intrusivo que email.
+2. **Email** (reply no próprio fio de comunicação anterior) — melhor rastreabilidade.
+3. **Telefone** — apenas se o recrutador usou este canal antes. Ligar sem contexto = intrusivo.
+
+### 10.3 Template de follow-up
+
+```
+[Nome do recrutador],
+
+Queria fazer um check-in sobre minha candidatura para a vaga de [Role]
+— apliquei em [data] e não recebi atualização desde então.
+
+Meu interesse pela posição continua alto, especialmente depois de
+[detalhe concreto: ler sobre X, conversa com Y do time, post recente
+da empresa]. Se houver algo que eu possa complementar no processo,
+fico à disposição.
+
+Obrigado,
+[Seu nome]
+[LinkedIn] | [telefone opcional]
+```
+
+Comprimento máximo: 5 frases. Sem exigência de resposta explícita — CTA implícito.
+
+### 10.4 Quantas vezes fazer follow-up antes de parar
+
+| # | Ação | Intervalo |
+|---|---|---|
+| 1 | Primeiro follow-up (check-in cordial) | Conforme timing da seção 10.1 |
+| 2 | Segundo follow-up (se silêncio total) | 10-14 dias após o primeiro |
+| 3 | Follow-up final (encerramento educado) | 10 dias após o segundo |
+
+Após o terceiro sem resposta: **encerrar o loop internamente**. Mover a oportunidade para "inativa" no seu pipeline. Não fazer quarto follow-up — queima relacionamento para o futuro.
+
+**Template de encerramento educado (3º follow-up)**:
+```
+[Nome],
+
+Não quero ocupar sua caixa mais do que o necessário — vou assumir que
+o timing não se encaixou desta vez. Se a situação mudar ou uma vaga
+similar surgir, ficaria feliz em retomar a conversa.
+
+Obrigado pela atenção,
+[Seu nome]
+```
+
+Este template funciona porque encerra sem hostilidade e deixa a porta aberta. Recrutadores que recebem isso frequentemente respondem — porque quebraste o padrão de "mais um follow-up chato".
