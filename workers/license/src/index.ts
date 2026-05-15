@@ -5,17 +5,23 @@
  *   POST /v1/check                    {licenseKey} → {valid, tier, expiresAt}
  *   POST /v1/issue                    Stripe webhook → KV write + email + WhatsApp
  *   POST /v1/revoke                   admin only (Bearer ADMIN_TOKEN)
- *   GET  /v1/license-by-session?session=cs_xxx → {licenseKey} for /thanks page
+ *   GET  /v1/license-by-session?session=cs_xxx → {licenseKey, mcpApiKey} for /thanks page
  *
  * License key format: `MAXV-<TIER>-<RANDOM_HEX>` where TIER ∈ {PRO, AGENCY}.
  * KV layout:
- *   {licenseKey}              → JSON LicenseRecord (5min cache TTL on /check)
- *   session:{stripe_session_id} → licenseKey  (lookup by Stripe session_id)
+ *   {licenseKey}                → JSON LicenseRecord
+ *   session:{stripe_session_id} → licenseKey   (TTL 30d, for /thanks recovery)
+ *   session:{stripe_session_id}:mcpkey → mcpApiKey (TTL 30d, for /thanks recovery)
  *
- * Notification (Sprint 8): on successful checkout.session.completed, send the
- * license key via Resend (email, free 100/day) + Evolution API (WhatsApp,
- * self-hosted, optional). Both are best-effort — webhook still 200s if either
- * delivery fails. The /thanks page also serves the key as a backup channel.
+ * Auth model (two layers, both required by linkedin-mcp server):
+ *   Layer 1 — MCP API Key  (coarse gate: "is a paying customer")
+ *             Client header: Authorization: Bearer mxv_xxxxx
+ *             Validated by: mcp-server against MCP_API_KEYS env
+ *   Layer 2 — License key (fine gate: tier + revocation per customer)
+ *             Client header: X-MaxVision-License: MAXV-PRO-xxxxx
+ *             Validated by: mcp-server calling LICENSE_SERVER_URL/v1/check
+ *
+ * Revocation: call /v1/revoke → sets revokedAt in KV → Layer 2 blocks immediately.
  */
 export interface Env {
   LICENSES: KVNamespace;
@@ -23,12 +29,17 @@ export interface Env {
   STRIPE_SECRET_KEY: string;
   ADMIN_TOKEN: string;
   ENVIRONMENT: string;
-  // Sprint 8 notification deps (optional, set via wrangler secret put):
+  // Shared MCP API key delivered to every paying customer (operator-controlled).
+  // Set via: wrangler secret put CUSTOMER_MCP_API_KEY --name maxv-linkedin-license
+  // Value: one of the mxv_* keys from MCP_API_KEYS in the linkedin-mcp container.
+  // Docs: https://github.com/produtoramaxvision/maxvision-linkedin-mcp
+  CUSTOMER_MCP_API_KEY?: string;
+  // Notification deps (optional):
   RESEND_API_KEY?: string;
-  RESEND_FROM_EMAIL?: string; // e.g. "noreply@produtoramaxvision.com.br"
-  EVOLUTION_API_URL?: string; // e.g. "https://evolution.meuagente.api.br"
+  RESEND_FROM_EMAIL?: string;
+  EVOLUTION_API_URL?: string;
   EVOLUTION_API_KEY?: string;
-  EVOLUTION_INSTANCE?: string; // e.g. "meu-agente"
+  EVOLUTION_INSTANCE?: string;
 }
 
 interface LicenseRecord {
@@ -72,17 +83,9 @@ async function handleCheck(req: Request, env: Env): Promise<Response> {
   if (new Date(rec.expiresAt) < new Date()) {
     return json(403, { valid: false, reason: 'expired', expiresAt: rec.expiresAt });
   }
-  return json(200, {
-    valid: true,
-    tier: rec.tier,
-    expiresAt: rec.expiresAt,
-  });
+  return json(200, { valid: true, tier: rec.tier, expiresAt: rec.expiresAt });
 }
 
-/**
- * Verify Stripe webhook signature (constant-time HMAC-SHA256 over the
- * `${timestamp}.${rawBody}` payload). Replay window: 5 min.
- */
 async function verifyStripeSignature(
   rawBody: string,
   signatureHeader: string,
@@ -128,15 +131,18 @@ function generateLicenseKey(tier: 'pro' | 'agency'): string {
 }
 
 /**
- * Send the license key via Resend (email). Best-effort — failures logged
- * but not raised. Free tier: 100 emails/day, 3k/month, no domain verification
- * needed when sending FROM `onboarding@resend.dev`. For production, verify
- * `produtoramaxvision.com.br` and switch RESEND_FROM_EMAIL.
+ * Returns the shared MCP API key to deliver to paying customers.
+ * Empty string when not configured — email omits the API key block.
  */
+function resolveMcpApiKey(env: Env): string {
+  return env.CUSTOMER_MCP_API_KEY ?? '';
+}
+
 async function sendLicenseEmail(
   env: Env,
   to: string,
   licenseKey: string,
+  mcpApiKey: string,
   tier: 'pro' | 'agency',
   expiresAt: string,
 ): Promise<{ ok: boolean; error?: string }> {
@@ -145,32 +151,58 @@ async function sendLicenseEmail(
   }
   const from = env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
   const tierLabel = tier === 'pro' ? 'Pro' : 'Agency';
-  const subject = `Sua license key MaxVision LinkedIn ${tierLabel}`;
+  const subject = `Suas credenciais MaxVision LinkedIn ${tierLabel}`;
   const expDate = new Date(expiresAt).toLocaleDateString('pt-BR');
-  const html = `<!DOCTYPE html>
-<html><body style="font-family:Inter,sans-serif;max-width:560px;margin:32px auto;color:#0f172a">
-  <h1 style="color:#1d4ed8">Bem-vindo ao MaxVision LinkedIn ${tierLabel}!</h1>
-  <p>Sua license key:</p>
-  <pre style="background:#f1f5f9;padding:16px;border-radius:8px;font-size:14px;overflow-x:auto"><strong>${licenseKey}</strong></pre>
-  <p><strong>Validade:</strong> até ${expDate}</p>
 
-  <h2 style="margin-top:32px">Como usar</h2>
-  <ol>
-    <li>Instale o plugin: <code>/plugin install maxvision-linkedin-suite</code> no Claude Code.</li>
-    <li>Exporte sua key como variável de ambiente:
-      <pre style="background:#f1f5f9;padding:12px;border-radius:6px"><code>export MAXVISION_LICENSE=${licenseKey}</code></pre>
+  const mcpApiKeyBlock = mcpApiKey
+    ? `
+  <h2 style="color:#0f172a;margin-top:24px;font-size:16px">2. MCP API Key (autenticação do servidor)</h2>
+  <pre style="background:#f1f5f9;padding:16px;border-radius:8px;font-size:13px;overflow-x:auto;border:1px solid #e2e8f0"><strong>${mcpApiKey}</strong></pre>
+  <p style="color:#64748b;font-size:13px">⚠️ Não compartilhe esta chave. Ela autentica sua conta no servidor LinkedIn MCP.</p>`
+    : '';
+
+  const envSetupBlock = mcpApiKey
+    ? `<pre style="background:#f1f5f9;padding:12px;border-radius:6px;font-size:12px;margin-top:4px;white-space:pre-wrap"># macOS / Linux
+export LINKEDIN_MCP_API_KEY="${mcpApiKey}"
+export MAXVISION_LICENSE="${licenseKey}"
+
+# Windows PowerShell
+[Environment]::SetEnvironmentVariable("LINKEDIN_MCP_API_KEY", "${mcpApiKey}", "User")
+[Environment]::SetEnvironmentVariable("MAXVISION_LICENSE", "${licenseKey}", "User")</pre>`
+    : `<pre style="background:#f1f5f9;padding:12px;border-radius:6px;font-size:12px;margin-top:4px">export MAXVISION_LICENSE="${licenseKey}"</pre>`;
+
+  const html = `<!DOCTYPE html>
+<html><body style="font-family:Inter,sans-serif;max-width:580px;margin:32px auto;color:#0f172a;background:#fff;padding:24px;border-radius:12px;border:1px solid #e2e8f0">
+  <h1 style="color:#0a66c2;border-bottom:2px solid #0a66c2;padding-bottom:12px">Bem-vindo ao MaxVision LinkedIn ${tierLabel}!</h1>
+  <p style="color:#475569">Compra confirmada. Abaixo suas credenciais — guarde com segurança.</p>
+
+  <h2 style="color:#0f172a;margin-top:24px;font-size:16px">1. License Key (controle de tier e revogação)</h2>
+  <pre style="background:#f1f5f9;padding:16px;border-radius:8px;font-size:13px;overflow-x:auto;border:1px solid #e2e8f0"><strong>${licenseKey}</strong></pre>
+${mcpApiKeyBlock}
+  <p style="color:#475569;margin-top:16px"><strong>Validade:</strong> até ${expDate}</p>
+
+  <h2 style="color:#0f172a;margin-top:32px;font-size:16px">Como configurar no Claude Code</h2>
+  <ol style="color:#475569;line-height:1.9">
+    <li>Instale o plugin:
+      <pre style="background:#f1f5f9;padding:8px 12px;border-radius:6px;font-size:12px;margin-top:4px">/plugin install linkedin-maxvision@maxvision-linkedin</pre>
     </li>
-    <li>Recarregue o plugin: <code>/plugin reload</code></li>
-    <li>Capture o cookie LinkedIn: <code>/linkedin-cookie-refresh</code></li>
-    <li>Comece a buscar vagas: <code>/linkedin-find-jobs &quot;Engenheiro de IA&quot;</code></li>
+    <li>Configure as variáveis de ambiente:
+      ${envSetupBlock}
+    </li>
+    <li>Reinicie o Claude Code completamente</li>
+    <li>Teste a conexão: <code style="color:#0a66c2">/linkedin-status</code></li>
+    <li>Configure o cookie LinkedIn: <code style="color:#0a66c2">/linkedin-cookie-refresh</code></li>
   </ol>
 
-  <h2 style="margin-top:32px">Suporte</h2>
-  <p>Discord priority: <a href="https://discord.gg/maxvision">discord.gg/maxvision</a><br>
-  Documentação: <a href="https://github.com/produtoramaxvision/maxvision-linkedin-mcp">GitHub</a></p>
+  <h2 style="color:#0f172a;margin-top:32px;font-size:16px">Suporte</h2>
+  <p style="color:#475569">
+    Documentação: <a href="https://linkedin.produtoramaxvision.com.br" style="color:#0a66c2">linkedin.produtoramaxvision.com.br</a><br>
+    GitHub: <a href="https://github.com/produtoramaxvision/maxvision-linkedin-mcp" style="color:#0a66c2">github.com/produtoramaxvision/maxvision-linkedin-mcp</a><br>
+    Email: <a href="mailto:produtoramaxvision@gmail.com" style="color:#0a66c2">produtoramaxvision@gmail.com</a>
+  </p>
 
   <hr style="margin-top:32px;border:0;border-top:1px solid #e2e8f0">
-  <p style="font-size:12px;color:#64748b">© 2026 Produtora MaxVision. Esta key é pessoal e intransferível.</p>
+  <p style="font-size:12px;color:#94a3b8">© 2026 Produtora MaxVision. Estas credenciais são pessoais e intransferíveis. Qualquer abuso resulta em revogação imediata sem reembolso.</p>
 </body></html>`;
 
   try {
@@ -192,19 +224,11 @@ async function sendLicenseEmail(
   }
 }
 
-/**
- * Send the license key via Evolution API (self-hosted WhatsApp).
- * Only fires if EVOLUTION_API_URL + EVOLUTION_API_KEY + EVOLUTION_INSTANCE
- * are configured AND the customer provided a phone number at checkout.
- *
- * Endpoint: POST {url}/message/sendText/{instance}
- *   Headers: apikey: {key}
- *   Body: { number: '5511999999999', text: 'message' }
- */
 async function sendLicenseWhatsApp(
   env: Env,
   phone: string,
   licenseKey: string,
+  mcpApiKey: string,
   tier: 'pro' | 'agency',
 ): Promise<{ ok: boolean; error?: string }> {
   if (!env.EVOLUTION_API_URL || !env.EVOLUTION_API_KEY || !env.EVOLUTION_INSTANCE || !phone) {
@@ -212,16 +236,20 @@ async function sendLicenseWhatsApp(
   }
   const cleanPhone = phone.replace(/\D/g, '');
   const tierLabel = tier === 'pro' ? 'Pro' : 'Agency';
+  const apiKeyLine = mcpApiKey ? `🔐 MCP API Key:\n\`${mcpApiKey}\`\n\n` : '';
   const text =
-    `🚀 *MaxVision LinkedIn ${tierLabel}*\n\n` +
-    `Sua license key:\n\`${licenseKey}\`\n\n` +
-    `Como usar:\n` +
-    `1. /plugin install maxvision-linkedin-suite\n` +
+    `🔵 *MaxVision LinkedIn ${tierLabel}*\n\n` +
+    `Suas credenciais:\n\n` +
+    `🔑 License Key:\n\`${licenseKey}\`\n\n` +
+    apiKeyLine +
+    `*Como configurar:*\n` +
+    `1. /plugin install linkedin-maxvision@maxvision-linkedin\n` +
     `2. export MAXVISION_LICENSE=${licenseKey}\n` +
-    `3. /plugin reload\n` +
-    `4. /linkedin-cookie-refresh\n` +
-    `5. /linkedin-find-jobs "Engenheiro de IA"\n\n` +
-    `Suporte: discord.gg/maxvision`;
+    (mcpApiKey ? `3. export LINKEDIN_MCP_API_KEY=${mcpApiKey}\n` : '') +
+    `${mcpApiKey ? '4' : '3'}. Reiniciar Claude Code\n` +
+    `${mcpApiKey ? '5' : '4'}. /linkedin-status para validar\n\n` +
+    `📖 linkedin.produtoramaxvision.com.br\n` +
+    `💬 produtoramaxvision@gmail.com`;
 
   try {
     const url = `${env.EVOLUTION_API_URL.replace(/\/$/, '')}/message/sendText/${encodeURIComponent(env.EVOLUTION_INSTANCE)}`;
@@ -272,14 +300,15 @@ async function handleIssue(req: Request, env: Env): Promise<Response> {
     return json(400, { error: 'invalid_tier_metadata' });
   }
   const expiresInDays = Number(session.metadata?.expires_in_days ?? '365');
-  const customerEmail =
-    session.customer_email ?? session.customer_details?.email ?? '';
+  const customerEmail = session.customer_email ?? session.customer_details?.email ?? '';
   const customerPhone = session.customer_details?.phone ?? '';
   const stripeCustomerId = session.customer ?? '';
   const sessionId = session.id ?? '';
   const licenseKey = generateLicenseKey(tier);
+  const mcpApiKey = resolveMcpApiKey(env);
   const now = new Date();
   const expiresAt = new Date(now.getTime() + expiresInDays * 86400 * 1000);
+
   const rec: LicenseRecord = {
     tier,
     customerEmail,
@@ -288,24 +317,28 @@ async function handleIssue(req: Request, env: Env): Promise<Response> {
     expiresAt: expiresAt.toISOString(),
     revokedAt: null,
   };
+
   await env.LICENSES.put(licenseKey, JSON.stringify(rec), {
     expirationTtl: expiresInDays * 86400 + 86400,
   });
-  // Index by Stripe session_id so /thanks page can fetch the key without
-  // needing the email channel (in case email delivery is delayed).
+
   if (sessionId) {
     await env.LICENSES.put(`session:${sessionId}`, licenseKey, {
-      expirationTtl: 30 * 86400, // 30 days — plenty for the user to revisit /thanks
+      expirationTtl: 30 * 86400,
+    });
+    // Store MCP API key by session so /thanks page can deliver it without waiting for email.
+    await env.LICENSES.put(`session:${sessionId}:mcpkey`, mcpApiKey, {
+      expirationTtl: 30 * 86400,
     });
   }
 
-  // Best-effort delivery — log results but don't fail the webhook.
-  const emailRes = await sendLicenseEmail(env, customerEmail, licenseKey, tier, rec.expiresAt);
-  const whatsappRes = await sendLicenseWhatsApp(env, customerPhone, licenseKey, tier);
+  const emailRes = await sendLicenseEmail(env, customerEmail, licenseKey, mcpApiKey, tier, rec.expiresAt);
+  const whatsappRes = await sendLicenseWhatsApp(env, customerPhone, licenseKey, mcpApiKey, tier);
 
   return json(200, {
     received: true,
     licenseKey,
+    mcpApiKey,
     tier,
     expiresAt: rec.expiresAt,
     notifications: { email: emailRes, whatsapp: whatsappRes },
@@ -334,12 +367,8 @@ async function handleRevoke(req: Request, env: Env): Promise<Response> {
 }
 
 /**
- * GET /v1/license-by-session?session=cs_xxx — used by /thanks.html to
- * recover the license key right after Stripe redirects back, without
- * waiting for email delivery.
- *
- * Public (no auth): the session_id is itself the auth token (Stripe-issued
- * unguessable string). We just resolve the indirection KV → license key.
+ * GET /v1/license-by-session?session=cs_xxx — used by /thanks page to
+ * recover both credentials right after Stripe redirects back.
  */
 async function handleLicenseBySession(req: Request, env: Env): Promise<Response> {
   const url = new URL(req.url);
@@ -354,8 +383,10 @@ async function handleLicenseBySession(req: Request, env: Env): Promise<Response>
   const raw = await env.LICENSES.get(licenseKey);
   if (!raw) return json(404, { error: 'license_not_found' });
   const rec = JSON.parse(raw) as LicenseRecord;
+  const mcpApiKey = (await env.LICENSES.get(`session:${sessionId}:mcpkey`)) ?? '';
   return json(200, {
     licenseKey,
+    mcpApiKey,
     tier: rec.tier,
     expiresAt: rec.expiresAt,
     customerEmail: rec.customerEmail,
@@ -366,30 +397,21 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
-    // CORS preflight for browser-side calls (e.g. /thanks page).
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         status: 204,
         headers: {
           'access-control-allow-origin': '*',
           'access-control-allow-methods': 'GET, POST, OPTIONS',
-          'access-control-allow-headers': 'content-type, authorization',
+          'access-control-allow-headers': 'content-type, authorization, stripe-signature',
         },
       });
     }
 
-    if (request.method === 'POST' && url.pathname === '/v1/check') {
-      return handleCheck(request, env);
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/issue') {
-      return handleIssue(request, env);
-    }
-    if (request.method === 'POST' && url.pathname === '/v1/revoke') {
-      return handleRevoke(request, env);
-    }
-    if (request.method === 'GET' && url.pathname === '/v1/license-by-session') {
-      return handleLicenseBySession(request, env);
-    }
+    if (request.method === 'POST' && url.pathname === '/v1/check') return handleCheck(request, env);
+    if (request.method === 'POST' && url.pathname === '/v1/issue') return handleIssue(request, env);
+    if (request.method === 'POST' && url.pathname === '/v1/revoke') return handleRevoke(request, env);
+    if (request.method === 'GET' && url.pathname === '/v1/license-by-session') return handleLicenseBySession(request, env);
     return json(404, { error: 'route_not_found', path: url.pathname });
   },
 };

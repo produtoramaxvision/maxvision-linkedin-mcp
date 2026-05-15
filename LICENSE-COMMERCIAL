@@ -1,0 +1,228 @@
+MAXVISION LINKEDIN MCP — END USER LICENSE AGREEMENT (EULA)
+Version 1.0, 15 May 2026
+
+Applies to: mcp-server/ and workers/ layers of this repository.
+Copyright (C) 2026 Produtora MaxVision. All rights reserved.
+
+IMPORTANT: READ CAREFULLY BEFORE USING THIS SOFTWARE.
+
+By installing, copying, or otherwise using the Software, you agree to
+be bound by the terms of this Agreement. If you do not agree, do not
+install or use the Software.
+
+---
+
+1. DEFINITIONS
+
+"Software" means the mcp-server/ and workers/ source code, compiled
+binaries, configuration files, API endpoints, and hosted services
+provided by Produtora MaxVision under this Agreement.
+
+"Licensor" means Produtora MaxVision, a Brazilian entity operating
+under CNPJ registered in Brazil.
+
+"Licensee" or "You" means the individual or legal entity that has
+accepted this Agreement.
+
+"License Key" means the unique key (format: MAXV-{TIER}-{HEX})
+issued to Licensee upon payment of the applicable subscription fee.
+
+"Subscription" means the recurring payment arrangement that grants
+Licensee access to the Software features corresponding to the
+purchased tier (Free, Pro, or Agency).
+
+---
+
+2. GRANT OF LICENSE
+
+Subject to the terms of this Agreement and payment of applicable fees,
+Licensor grants Licensee a limited, non-exclusive, non-transferable,
+revocable license to:
+
+a) Access and use the Software's hosted API endpoints for personal or
+   internal business purposes consistent with the purchased tier;
+
+b) Integrate the Software with Claude Code via the plugin layer
+   (governed separately by LICENSE-FREE / AGPL-3.0);
+
+c) Use the Software to interact with LinkedIn on behalf of accounts
+   owned by Licensee, subject to LinkedIn's User Agreement.
+
+This license does not include the right to sublicense, sell, rent,
+lease, transfer, or otherwise make available the Software to third
+parties, except as expressly permitted in writing by Licensor.
+
+---
+
+3. RESTRICTIONS
+
+Licensee shall NOT:
+
+a) Copy, modify, translate, reverse engineer, decompile, disassemble,
+   or create derivative works of the Software's mcp-server/ or
+   workers/ layers;
+
+b) Distribute, resell, sublicense, or otherwise transfer the Software
+   or any rights therein to any third party;
+
+c) Use the Software to build a competing product or service that
+   provides substantially similar functionality;
+
+d) Share, publish, or make available the License Key to any third
+   party or use a single License Key across multiple users or
+   organizations beyond the permitted tier limits;
+
+e) Remove, alter, or obscure any copyright, trademark, or other
+   proprietary notices in the Software;
+
+f) Use the Software in violation of LinkedIn's User Agreement,
+   Professional Community Policies, or applicable law, including
+   Brazilian Lei 13.709/2018 (LGPD) and Lei 12.965/2014 (Marco
+   Civil da Internet);
+
+g) Use the Software to collect, harvest, or aggregate personal data
+   of third parties beyond what is strictly necessary for the
+   Licensee's own job search or professional networking activities;
+
+h) Attempt to circumvent the License Key enforcement, rate limiting,
+   or any other technical protection measures implemented in the
+   Software.
+
+---
+
+4. SUBSCRIPTION, FEES, AND PAYMENT
+
+4.1 The Software is available under tiered subscription plans with
+    corresponding features and pricing as published on the Licensor's
+    website at https://linkedin.produtoramaxvision.com.br/pricing.
+
+4.2 Fees are billed in advance on a monthly or annual basis through
+    the payment processor (Stripe). All fees are in Brazilian Reais
+    (BRL) and are non-refundable except as required by Brazilian
+    consumer protection law (CDC, Lei 8.078/1990).
+
+4.3 Licensor reserves the right to change pricing with 30 days'
+    written notice. Continued use after the effective date constitutes
+    acceptance of new pricing.
+
+4.4 Failure to pay results in suspension of the License Key within
+    72 hours of the failed payment, and termination if payment is
+    not remedied within 14 days.
+
+---
+
+5. INTELLECTUAL PROPERTY
+
+5.1 The Software and all copies thereof are proprietary to Licensor
+    and title thereto remains with Licensor. All applicable rights
+    in patents, copyrights, trademarks, and trade secrets in the
+    Software are and will remain the property of Licensor.
+
+5.2 Licensee acknowledges that no title to the intellectual property
+    in the Software is transferred. Licensee further acknowledges
+    that the Software embodies substantial creative work, skill, and
+    investment by Licensor.
+
+---
+
+6. TERMINATION
+
+6.1 This Agreement is effective until terminated.
+
+6.2 Licensor may terminate this Agreement immediately upon written
+    notice if Licensee:
+    a) Breaches any provision of this Agreement and fails to cure
+       such breach within 7 days of notice;
+    b) Violates LinkedIn's User Agreement in connection with use of
+       the Software;
+    c) Uses the Software to infringe the rights of third parties;
+    d) Fails to pay any applicable subscription fees.
+
+6.3 Upon termination, all rights granted under this Agreement cease
+    immediately. Licensee must destroy all copies of any portion of
+    the Software in its possession.
+
+---
+
+7. DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND
+NON-INFRINGEMENT. LICENSOR DOES NOT WARRANT THAT THE SOFTWARE WILL
+BE UNINTERRUPTED OR ERROR-FREE, OR THAT DEFECTS WILL BE CORRECTED.
+
+LICENSOR MAKES NO WARRANTY REGARDING THE AVAILABILITY, RELIABILITY,
+OR PERFORMANCE OF LINKEDIN'S PLATFORM, AND IS NOT RESPONSIBLE FOR
+ANY ACTIONS TAKEN BY LINKEDIN INCLUDING ACCOUNT SUSPENSION OR
+TERMINATION.
+
+---
+
+8. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL
+LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+OR CONSEQUENTIAL DAMAGES (INCLUDING, WITHOUT LIMITATION, LOSS OF
+PROFITS, BUSINESS INTERRUPTION, OR LOSS OF DATA) ARISING OUT OF OR
+IN CONNECTION WITH THIS AGREEMENT OR THE USE OF THE SOFTWARE, EVEN
+IF LICENSOR HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+LICENSOR'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATED TO
+THIS AGREEMENT SHALL NOT EXCEED THE FEES PAID BY LICENSEE IN THE
+THREE (3) MONTHS PRECEDING THE CLAIM.
+
+NOTHING IN THIS AGREEMENT SHALL EXCLUDE OR LIMIT LIABILITY FOR
+FRAUD, DEATH, OR PERSONAL INJURY CAUSED BY NEGLIGENCE, OR ANY OTHER
+LIABILITY THAT CANNOT BE EXCLUDED OR LIMITED UNDER APPLICABLE
+BRAZILIAN LAW.
+
+---
+
+9. DATA PRIVACY AND LGPD COMPLIANCE
+
+9.1 Licensor processes personal data in accordance with Brazilian
+    Lei 13.709/2018 (LGPD). Licensor's Privacy Policy, available
+    at https://linkedin.produtoramaxvision.com.br/privacidade,
+    describes the categories of data collected, legal bases for
+    processing, retention periods, and data subject rights.
+
+9.2 Licensee is responsible for ensuring their use of the Software
+    complies with LGPD with respect to data of third parties whose
+    information is accessed through Licensee's LinkedIn account.
+
+---
+
+10. GOVERNING LAW AND DISPUTE RESOLUTION
+
+10.1 This Agreement shall be governed by and construed in accordance
+     with the laws of the Federative Republic of Brazil, without
+     regard to its conflict of law provisions.
+
+10.2 Any dispute arising out of or in connection with this Agreement
+     shall be submitted to the exclusive jurisdiction of the courts
+     of the City of São Paulo, State of São Paulo, Brazil.
+
+10.3 Brazilian consumer protection legislation (CDC) applies to
+     Licensees who are natural persons using the Software for
+     personal, non-commercial purposes.
+
+---
+
+11. ENTIRE AGREEMENT
+
+This Agreement constitutes the entire agreement between the parties
+with respect to the Software and supersedes all prior or contemporaneous
+understandings regarding such subject matter. No amendment to or
+modification of this Agreement will be binding unless in writing and
+signed by Licensor.
+
+If any provision of this Agreement is found to be unenforceable or
+invalid, that provision will be limited or eliminated to the minimum
+extent necessary so that this Agreement will otherwise remain in full
+force and effect and enforceable.
+
+---
+
+For licensing inquiries: produtoramaxvision@gmail.com
+Website: https://linkedin.produtoramaxvision.com.br
