@@ -3,12 +3,9 @@ main = "src/index.ts"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# Routes — bind to license.produtoramaxvision.com.br
-# (linkedin.maxvision.com.br zone unavailable; reusing the existing CF zone
-# produtoramaxvision.com.br where linkedin-mcp.produtoramaxvision.com.br
-# already lives.)
+# Route — endpoint canônico único (migrado 2026-05-15)
 routes = [
-  { pattern = "license.produtoramaxvision.com.br/v1/*", zone_name = "produtoramaxvision.com.br" },
+  { pattern = "linkedin-license.produtoramaxvision.com.br/v1/*", zone_name = "produtoramaxvision.com.br" },
 ]
 
 # KV namespace for license key storage. Create with:
